@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WinTraceLens - 历史通信记录</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --panel: #ffffff;
+      --line: #d9e0ea;
+      --line-soft: #edf1f6;
+      --text: #182235;
+      --muted: #5b6678;
+      --head: #243447;
+      --head-2: #edf3f8;
+      --accent: #1769aa;
+      --accent-dark: #0f4e82;
+      --bad: #a41220;
+      --warn: #9a5200;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+      font-size: 14px;
+      letter-spacing: 0;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 13px 18px;
+      background: var(--head);
+      color: #fff;
+    }
+    h1 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 650;
+      letter-spacing: 0;
+    }
+    main {
+      display: grid;
+      grid-template-rows: auto auto auto minmax(0, 1fr);
+      gap: 10px;
+      height: calc(100vh - 48px);
+      padding: 12px;
+    }
+    .toolbar, .tabs, .meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    input, select {
+      width: min(560px, 100%);
+      height: 34px;
+      padding: 6px 10px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: #fff;
+      color: var(--text);
+      font: inherit;
+    }
+    input.date-input {
+      width: 148px;
+      min-width: 148px;
+      flex: 0 0 148px;
+    }
+    select.limit-select {
+      width: 132px;
+      min-width: 132px;
+      flex: 0 0 132px;
+    }
+    .range-label {
+      color: var(--muted);
+      font-size: 13px;
+      white-space: nowrap;
+    }
+    button, a.button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: 34px;
+      padding: 0 12px;
+      border: 1px solid var(--accent-dark);
+      border-radius: 4px;
+      background: var(--accent);
+      color: #fff;
+      cursor: pointer;
+      font: inherit;
+      text-decoration: none;
+    }
+    button.secondary, a.button.secondary {
+      border-color: var(--line);
+      background: #fff;
+      color: var(--text);
+    }
+    button.tab {
+      border-color: var(--line);
+      background: #fff;
+      color: var(--text);
+    }
+    button.tab.active {
+      border-color: var(--accent);
+      background: #e8f2fb;
+      color: var(--accent-dark);
+    }
+    button:disabled { cursor: not-allowed; opacity: 0.45; }
+    .status {
+      margin-left: auto;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .meta {
+      min-height: 34px;
+      color: var(--muted);
+    }
+    .error {
+      display: inline-flex;
+      align-items: center;
+      min-height: 26px;
+      padding: 3px 9px;
+      border: 1px solid #f0ce9f;
+      border-radius: 999px;
+      background: #fff7e8;
+      color: var(--warn);
+    }
+    .panel {
+      min-height: 0;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel);
+      overflow: hidden;
+    }
+    .table-wrap {
+      height: 100%;
+      overflow: auto;
+    }
+    table {
+      width: 100%;
+      min-width: 1720px;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+    th, td {
+      border-bottom: 1px solid var(--line-soft);
+      padding: 7px 8px;
+      text-align: left;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: var(--head-2);
+      color: #26384f;
+      font-weight: 650;
+    }
+    tbody tr:hover td { background: #f3f8ff; }
+    .time { width: 160px; }
+    .source { width: 120px; }
+    .event { width: 82px; }
+    .process { width: 280px; }
+    .pid { width: 80px; }
+    .proto { width: 82px; }
+    .endpoint { width: 230px; }
+    .query { width: 260px; }
+    .action { width: 90px; }
+    .user { width: 170px; }
+    .details { width: 340px; }
+    .empty { padding: 18px; color: var(--muted); }
+    .bad { color: var(--bad); }
+  </style>
+  <link rel="stylesheet" href="/nav.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header>
+    <h1>WinTraceLens</h1>
+    <div class="app-meta">
+      <span class="release-badge" data-app-version>1.0 基础版</span>
+      <span class="permission-badge unknown" data-admin-status>权限检测中</span>
+      <span class="module-title">历史通信记录</span>
+    </div>
+  </header>
+  <main>
+    <div class="toolbar">
+      <nav class="top-nav" aria-label="主要功能">
+        <a class="nav-link" href="/">进程信息</a>
+        <a class="nav-link" href="/host.html">主机信息</a>
+        <a class="nav-link" href="/findings.html">关注项</a>
+        <a class="nav-link" href="/threat.html">威胁分析</a>
+        <a class="nav-link" href="/filetrace.html">文件痕迹</a>
+        <a class="nav-link" aria-current="page" href="/history.html">历史通信</a>
+        <a class="nav-link" href="/security.html">事件日志</a>
+        <a class="nav-link" href="/health.html">日志健康</a>
+        <a class="nav-link" href="/yara.html">YARA扫描</a>
+        <a class="nav-link" href="/ai.html">AI分析</a>
+      </nav>
+      <span class="current-module">当前：历史通信</span>
+      <span class="range-label">日志时间</span>
+      <input id="start-date" class="date-input" type="date" title="开始日期">
+      <span class="range-label">至</span>
+      <input id="end-date" class="date-input" type="date" title="结束日期">
+      <select id="max-records" class="limit-select" title="最多读取条数">
+        <option value="500">最多 500</option>
+        <option value="1000" selected>最多 1000</option>
+        <option value="2000">最多 2000</option>
+        <option value="5000">最多 5000</option>
+      </select>
+      <button id="refresh">刷新历史记录</button>
+      <button id="export-csv" class="secondary" disabled>导出 CSV</button>
+      <input id="filter" placeholder="按来源、进程、PID、地址、DNS、用户、详情过滤">
+      <span id="status" class="status">尚未加载</span>
+    </div>
+    <div class="tabs">
+      <button class="tab active" data-tab="connections" data-label="连接历史">连接历史</button>
+      <button class="tab" data-tab="dns" data-label="DNS 记录">DNS 记录</button>
+      <button class="tab" data-tab="all" data-label="全部证据">全部证据</button>
+    </div>
+    <div id="meta" class="meta"></div>
+    <section class="panel">
+      <div id="table" class="table-wrap">
+        <div class="empty">正在加载历史通信记录...</div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const table = document.getElementById('table');
+    const filter = document.getElementById('filter');
+    const statusEl = document.getElementById('status');
+    const meta = document.getElementById('meta');
+    const exportCSV = document.getElementById('export-csv');
+    const startDate = document.getElementById('start-date');
+    const endDate = document.getElementById('end-date');
+    const maxRecords = document.getElementById('max-records');
+    let records = [];
+    let collectionErrors = [];
+    let activeTab = 'connections';
+
+    function text(value) {
+      return value == null ? '' : String(value);
+    }
+
+    function escapeCell(value) {
+      return text(value).replace(/[&<>"']/g, ch => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[ch]));
+    }
+
+    function visibleItems() {
+      const tabItems = records.filter(tabMatches);
+      const q = filter.value.trim().toLowerCase();
+      if (!q) return tabItems;
+      return tabItems.filter(item => Object.values(item).some(v => text(v).toLowerCase().includes(q)));
+    }
+
+    function isConnectionRecord(item) {
+      return ['Sysmon', '安全日志 WFP', '防火墙日志'].includes(item.source);
+    }
+
+    function isDNSRecord(item) {
+      return ['DNS 缓存', 'Sysmon DNS', 'DNS Client 日志'].includes(item.source);
+    }
+
+    function tabMatches(item) {
+      if (activeTab === 'connections') return isConnectionRecord(item);
+      if (activeTab === 'dns') return isDNSRecord(item);
+      return true;
+    }
+
+    function tabCount(tab) {
+      const previous = activeTab;
+      activeTab = tab;
+      const count = records.filter(tabMatches).length;
+      activeTab = previous;
+      return count;
+    }
+
+    function updateTabs() {
+      document.querySelectorAll('button.tab').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.tab === activeTab);
+        btn.textContent = `${btn.dataset.label} ${tabCount(btn.dataset.tab)}`;
+      });
+    }
+
+    function renderMeta(items) {
+      const sources = [...new Set(items.map(x => x.source).filter(Boolean))];
+      const connectionCount = records.filter(isConnectionRecord).length;
+      const dnsCount = records.filter(isDNSRecord).length;
+      const errors = collectionErrors.map(x => `<span class="error" title="${escapeCell(x)}">${escapeCell(x)}</span>`).join('');
+      meta.innerHTML = `<span>当前来源 ${sources.length}: ${escapeCell(sources.join(' / ') || '无')}</span><span>连接历史 ${connectionCount}</span><span>DNS 记录 ${dnsCount}</span>${errors}`;
+    }
+
+    function render() {
+      const items = visibleItems();
+      updateTabs();
+      renderMeta(items);
+      const tabTotal = records.filter(tabMatches).length;
+      const activeLabel = document.querySelector(`button.tab[data-tab="${activeTab}"]`)?.dataset.label || '历史记录';
+      statusEl.textContent = `${activeLabel} ${items.length} / ${tabTotal}`;
+      if (!items.length) {
+        if (activeTab === 'connections') {
+          table.innerHTML = '<div class="empty">当前没有连接历史记录。Windows 默认不保存完整历史连接；需要启用 Sysmon 网络事件、Windows Filtering Platform 连接审计，或 Windows 防火墙日志后才会有连接级历史记录。DNS 证据请切换到“DNS 记录”页签查看。</div>';
+        } else if (activeTab === 'dns') {
+          table.innerHTML = '<div class="empty">当前没有 DNS 记录。DNS 缓存没有时间和发起进程；如需定位日期和进程，建议启用 Sysmon DNS 事件 22 或 DNS Client Operational 日志。</div>';
+        } else {
+          table.innerHTML = '<div class="empty">没有匹配的历史网络证据</div>';
+        }
+        return;
+      }
+      table.innerHTML = `<table><thead><tr>
+        <th class="time">时间</th><th class="source">来源</th><th class="event">事件ID</th><th class="process">进程</th><th class="pid">PID</th>
+        <th class="proto">协议</th><th class="endpoint">本地地址</th><th class="endpoint">远程地址</th><th class="query">DNS 查询</th>
+        <th class="action">动作</th><th class="user">用户</th><th class="details">详情</th>
+      </tr></thead><tbody>${items.map(x => `<tr>
+        <td class="time" title="${escapeCell(x.time)}">${escapeCell(x.time)}</td>
+        <td class="source" title="${escapeCell(x.source)}">${escapeCell(x.source)}</td>
+        <td class="event" title="${escapeCell(x.eventId)}">${escapeCell(x.eventId)}</td>
+        <td class="process" title="${escapeCell(x.process)}">${escapeCell(x.process)}</td>
+        <td class="pid" title="${escapeCell(x.pid)}">${escapeCell(x.pid)}</td>
+        <td class="proto" title="${escapeCell(x.proto)}">${escapeCell(x.proto)}</td>
+        <td class="endpoint" title="${escapeCell(x.local)}">${escapeCell(x.local)}</td>
+        <td class="endpoint" title="${escapeCell(x.remote)}">${escapeCell(x.remote)}</td>
+        <td class="query" title="${escapeCell(x.query)}">${escapeCell(x.query)}</td>
+        <td class="action" title="${escapeCell(x.action)}">${escapeCell(x.action)}</td>
+        <td class="user" title="${escapeCell(x.user)}">${escapeCell(x.user)}</td>
+        <td class="details" title="${escapeCell(x.details)}">${escapeCell(x.details)}</td>
+      </tr>`).join('')}</tbody></table>`;
+    }
+
+    async function loadJSON(url, options) {
+      const res = await fetch(url, options || { cache: 'no-store' });
+      if (!res.ok) {
+        const msg = await res.text();
+        throw new Error(msg || res.statusText);
+      }
+      return res.json();
+    }
+
+    function downloadCSV(url) {
+      const a = document.createElement('a');
+      a.href = url;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }
+
+    function queryString() {
+      const params = new URLSearchParams({ max: maxRecords.value || '1000', category: activeTab });
+      const q = filter.value.trim();
+      if (q) params.set('q', q);
+      if (startDate.value) params.set('start', startDate.value);
+      if (endDate.value) params.set('end', endDate.value);
+      return params.toString();
+    }
+
+    function loadQueryString() {
+      const params = new URLSearchParams({ max: maxRecords.value || '1000' });
+      if (startDate.value) params.set('start', startDate.value);
+      if (endDate.value) params.set('end', endDate.value);
+      return params.toString();
+    }
+
+    async function load() {
+      statusEl.textContent = '正在采集历史通信记录...';
+      exportCSV.disabled = true;
+      meta.innerHTML = '';
+      table.innerHTML = '<div class="empty">正在采集 Sysmon、安全日志、防火墙日志、DNS Client 日志和 DNS 缓存...</div>';
+      const data = await loadJSON(`/api/network/history?${loadQueryString()}`);
+      records = data.records || [];
+      collectionErrors = data.collectionErrors || [];
+      exportCSV.disabled = false;
+      statusEl.textContent = `生成时间 ${data.generatedAt || ''}，记录 ${records.length}`;
+      render();
+    }
+
+    document.getElementById('refresh').addEventListener('click', () => {
+      load().catch(err => {
+        table.innerHTML = `<div class="empty bad">${escapeCell(err.message)}</div>`;
+        statusEl.textContent = '加载失败';
+      });
+    });
+
+    exportCSV.addEventListener('click', () => {
+      statusEl.textContent = '正在生成 CSV...';
+      downloadCSV(`/api/network/history.csv?${queryString()}`);
+    });
+
+    document.querySelectorAll('button.tab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        activeTab = btn.dataset.tab;
+        render();
+      });
+    });
+
+    filter.addEventListener('input', render);
+    startDate.addEventListener('change', () => load().catch(err => {
+      table.innerHTML = `<div class="empty bad">${escapeCell(err.message)}</div>`;
+      statusEl.textContent = '加载失败';
+    }));
+    endDate.addEventListener('change', () => load().catch(err => {
+      table.innerHTML = `<div class="empty bad">${escapeCell(err.message)}</div>`;
+      statusEl.textContent = '加载失败';
+    }));
+    maxRecords.addEventListener('change', () => load().catch(err => {
+      table.innerHTML = `<div class="empty bad">${escapeCell(err.message)}</div>`;
+      statusEl.textContent = '加载失败';
+    }));
+
+    load().catch(err => {
+      table.innerHTML = `<div class="empty bad">${escapeCell(err.message)}</div>`;
+      statusEl.textContent = '加载失败';
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WinTraceLens - 日志源健康检查</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --panel: #ffffff;
+      --line: #d9e0ea;
+      --line-soft: #edf1f6;
+      --text: #182235;
+      --muted: #5b6678;
+      --head: #243447;
+      --head-2: #edf3f8;
+      --accent: #1769aa;
+      --accent-dark: #0f4e82;
+      --ok: #176b43;
+      --warn: #9a5200;
+      --bad: #a41220;
+      --info: #2b5b91;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+      font-size: 14px;
+      letter-spacing: 0;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 13px 18px;
+      background: var(--head);
+      color: #fff;
+    }
+    h1 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 650;
+      letter-spacing: 0;
+    }
+    main {
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr);
+      gap: 10px;
+      height: calc(100vh - 48px);
+      padding: 12px;
+    }
+    .toolbar, .summary {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    input, select {
+      width: min(420px, 100%);
+      height: 34px;
+      padding: 6px 10px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: #fff;
+      color: var(--text);
+      font: inherit;
+    }
+    select { width: 150px; }
+    button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: 34px;
+      padding: 0 12px;
+      border: 1px solid var(--accent-dark);
+      border-radius: 4px;
+      background: var(--accent);
+      color: #fff;
+      cursor: pointer;
+      font: inherit;
+    }
+    button.secondary {
+      border-color: var(--line);
+      background: #fff;
+      color: var(--text);
+    }
+    button:hover { filter: brightness(0.96); }
+    .status {
+      color: var(--muted);
+      font-size: 13px;
+      white-space: nowrap;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      height: 26px;
+      padding: 0 9px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fff;
+      color: var(--text);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .badge.ok { border-color: #b8d7c8; background: #edf8f2; color: var(--ok); }
+    .badge.warn { border-color: #f0ce9f; background: #fff7e8; color: var(--warn); }
+    .badge.bad { border-color: #edb4bd; background: #fff0f2; color: var(--bad); }
+    .badge.info { border-color: #c7d7ee; background: #eef5fd; color: var(--info); }
+    .panel {
+      min-height: 0;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: var(--panel);
+      overflow: hidden;
+    }
+    .table-wrap {
+      height: 100%;
+      overflow: auto;
+    }
+    table {
+      width: 100%;
+      min-width: 1320px;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+    th, td {
+      border-bottom: 1px solid var(--line-soft);
+      padding: 8px 10px;
+      text-align: left;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: var(--head-2);
+      color: #26384f;
+      font-weight: 650;
+    }
+    tbody tr:hover td { background: #f3f8ff; }
+    .category { width: 110px; }
+    .name { width: 180px; }
+    .status-col { width: 98px; }
+    .log { width: 310px; }
+    .ids { width: 120px; }
+    .time { width: 150px; }
+    .count { width: 110px; }
+    .details { width: 330px; }
+    .recommend { width: 330px; }
+    .empty {
+      padding: 18px;
+      color: var(--muted);
+    }
+    .bad { color: var(--bad); }
+  </style>
+  <link rel="stylesheet" href="/nav.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header>
+    <h1>WinTraceLens</h1>
+    <div class="app-meta">
+      <span class="release-badge" data-app-version>1.0 基础版</span>
+      <span class="permission-badge unknown" data-admin-status>权限检测中</span>
+      <span class="module-title">日志源健康检查</span>
+    </div>
+  </header>
+
+  <main>
+    <div class="toolbar">
+      <nav class="top-nav" aria-label="主要功能">
+        <a class="nav-link" href="/">进程信息</a>
+        <a class="nav-link" href="/host.html">主机信息</a>
+        <a class="nav-link" href="/findings.html">关注项</a>
+        <a class="nav-link" href="/threat.html">威胁分析</a>
+        <a class="nav-link" href="/filetrace.html">文件痕迹</a>
+        <a class="nav-link" href="/history.html">历史通信</a>
+        <a class="nav-link" href="/security.html">事件日志</a>
+        <a class="nav-link" aria-current="page" href="/health.html">日志健康</a>
+        <a class="nav-link" href="/yara.html">YARA扫描</a>
+        <a class="nav-link" href="/ai.html">AI分析</a>
+      </nav>
+      <span class="current-module">当前：日志健康</span>
+      <button id="refresh">刷新健康检查</button>
+      <select id="status-filter" title="按状态过滤">
+        <option value="all">全部状态</option>
+        <option value="可用">可用</option>
+        <option value="无事件">无事件</option>
+        <option value="未启用">未启用</option>
+        <option value="未安装">未安装</option>
+        <option value="权限不足">权限不足</option>
+        <option value="不可用">不可用</option>
+      </select>
+      <input id="filter" placeholder="按类别、日志源、日志名、详情、建议过滤">
+      <span id="status" class="status">尚未加载</span>
+    </div>
+
+    <div id="summary" class="summary"></div>
+
+    <section class="panel">
+      <div id="table" class="table-wrap">
+        <div class="empty">正在检查日志源...</div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const table = document.getElementById('table');
+    const filter = document.getElementById('filter');
+    const statusFilter = document.getElementById('status-filter');
+    const statusEl = document.getElementById('status');
+    const summaryEl = document.getElementById('summary');
+    let sources = [];
+    let summary = {};
+
+    function text(value) {
+      return value == null ? '' : String(value);
+    }
+
+    function escapeCell(value) {
+      return text(value).replace(/[&<>"']/g, ch => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[ch]));
+    }
+
+    function statusClass(value) {
+      if (value === '可用') return 'ok';
+      if (value === '无事件' || value === '未启用') return 'warn';
+      return 'bad';
+    }
+
+    function visibleItems() {
+      const status = statusFilter.value;
+      const q = filter.value.trim().toLowerCase();
+      return sources.filter(item => {
+        if (status !== 'all' && item.status !== status) return false;
+        if (!q) return true;
+        return Object.values(item).some(v => text(v).toLowerCase().includes(q));
+      });
+    }
+
+    function renderSummary() {
+      summaryEl.innerHTML = [
+        `<span class="badge info">来源 ${summary.total || 0}</span>`,
+        `<span class="badge ok">可用 ${summary.available || 0}</span>`,
+        `<span class="badge warn">无事件 ${summary.noEvents || 0}</span>`,
+        `<span class="badge bad">不可用 ${summary.unavailable || 0}</span>`,
+        `<span class="badge bad">权限不足 ${summary.permissionIssue || 0}</span>`
+      ].join('');
+    }
+
+    function render() {
+      renderSummary();
+      const items = visibleItems();
+      statusEl.textContent = `显示 ${items.length} / ${sources.length}`;
+      if (!items.length) {
+        table.innerHTML = '<div class="empty">没有匹配的日志源状态</div>';
+        return;
+      }
+      table.innerHTML = `<table>
+        <thead>
+          <tr>
+            <th class="category">类别</th>
+            <th class="name">日志源</th>
+            <th class="status-col">状态</th>
+            <th class="log">日志名/来源</th>
+            <th class="ids">事件ID</th>
+            <th class="time">最后事件</th>
+            <th class="count">记录/大小</th>
+            <th class="details">详情</th>
+            <th class="recommend">建议</th>
+          </tr>
+        </thead>
+        <tbody>${items.map(item => `<tr>
+          <td class="category" title="${escapeCell(item.category)}">${escapeCell(item.category)}</td>
+          <td class="name" title="${escapeCell(item.name)}">${escapeCell(item.name)}</td>
+          <td class="status-col"><span class="badge ${statusClass(item.status)}">${escapeCell(item.status)}</span></td>
+          <td class="log" title="${escapeCell(item.logName)}">${escapeCell(item.logName)}</td>
+          <td class="ids" title="${escapeCell(item.eventIds)}">${escapeCell(item.eventIds)}</td>
+          <td class="time" title="${escapeCell(item.lastEventTime)}">${escapeCell(item.lastEventTime)}</td>
+          <td class="count" title="${escapeCell(item.recordCount)}">${escapeCell(item.recordCount)}</td>
+          <td class="details" title="${escapeCell(item.details)}">${escapeCell(item.details)}</td>
+          <td class="recommend" title="${escapeCell(item.recommendation)}">${escapeCell(item.recommendation)}</td>
+        </tr>`).join('')}</tbody>
+      </table>`;
+    }
+
+    async function loadJSON(url) {
+      const res = await fetch(url, { cache: 'no-store' });
+      if (!res.ok) throw new Error(await res.text() || res.statusText);
+      return res.json();
+    }
+
+    async function load() {
+      statusEl.textContent = '正在检查日志源...';
+      summaryEl.innerHTML = '';
+      table.innerHTML = '<div class="empty">正在检查安全日志、Sysmon、WFP、防火墙、PowerShell、RDP、SQL Server 和 DNS 来源...</div>';
+      const data = await loadJSON('/api/log/health');
+      sources = data.sources || [];
+      summary = data.summary || {};
+      statusEl.textContent = `生成时间 ${data.generatedAt || ''}`;
+      render();
+    }
+
+    document.getElementById('refresh').addEventListener('click', () => {
+      load().catch(err => {
+        table.innerHTML = `<div class="empty bad">${escapeCell(err.message)}</div>`;
+        statusEl.textContent = '检查失败';
+      });
+    });
+    filter.addEventListener('input', render);
+    statusFilter.addEventListener('change', render);
+
+    load().catch(err => {
+      table.innerHTML = `<div class="empty bad">${escapeCell(err.message)}</div>`;
+      statusEl.textContent = '检查失败';
+    });
+  </script>
+</body>
+</html>

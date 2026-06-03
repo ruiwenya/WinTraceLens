@@ -1,0 +1,546 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WinTraceLens - 事件日志分析</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --panel: #ffffff;
+      --line: #d9e0ea;
+      --line-soft: #edf1f6;
+      --text: #182235;
+      --muted: #5b6678;
+      --head: #243447;
+      --head-2: #edf3f8;
+      --accent: #1769aa;
+      --accent-dark: #0f4e82;
+      --bad: #a41220;
+      --warn: #9a5200;
+      --ok: #176b43;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+      font-size: 14px;
+      letter-spacing: 0;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 13px 18px;
+      background: var(--head);
+      color: #fff;
+    }
+    h1 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 650;
+      letter-spacing: 0;
+    }
+    main {
+      display: grid;
+      grid-template-rows: auto auto auto minmax(0, 1fr);
+      gap: 10px;
+      height: calc(100vh - 48px);
+      padding: 12px;
+    }
+    .toolbar, .summary, .tabs {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    input, select {
+      width: min(560px, 100%);
+      height: 34px;
+      padding: 6px 10px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: #fff;
+      color: var(--text);
+      font: inherit;
+    }
+    input.date-input {
+      width: 148px;
+      min-width: 148px;
+      flex: 0 0 148px;
+    }
+    .range-label {
+      color: var(--muted);
+      font-size: 13px;
+      white-space: nowrap;
+    }
+    select.limit-select {
+      width: 106px;
+      min-width: 106px;
+      flex: 0 0 106px;
+    }
+    button, a.button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: 34px;
+      padding: 0 12px;
+      border: 1px solid var(--accent-dark);
+      border-radius: 4px;
+      background: var(--accent);
+      color: #fff;
+      cursor: pointer;
+      font: inherit;
+      text-decoration: none;
+    }
+    button.secondary, a.button.secondary {
+      border-color: var(--line);
+      background: #fff;
+      color: var(--text);
+    }
+    button.tab {
+      border-color: var(--line);
+      background: #fff;
+      color: var(--text);
+    }
+    button.tab.active {
+      border-color: var(--accent);
+      background: #e8f2fb;
+      color: var(--accent-dark);
+    }
+    button:disabled { cursor: not-allowed; opacity: 0.45; }
+    .status {
+      margin-left: auto;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .summary {
+      min-height: 34px;
+      color: var(--muted);
+    }
+    .count {
+      display: inline-flex;
+      align-items: center;
+      height: 26px;
+      padding: 0 9px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fff;
+      color: var(--text);
+    }
+    .count.bad { border-color: #edb4bd; background: #fff0f2; color: var(--bad); }
+    .count.warn { border-color: #f0ce9f; background: #fff7e8; color: var(--warn); }
+    .count.ok { border-color: #b8d7c8; background: #edf8f2; color: var(--ok); }
+    .panel {
+      min-height: 0;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel);
+      overflow: hidden;
+    }
+    .table-wrap {
+      height: 100%;
+      overflow: auto;
+    }
+    table {
+      width: 100%;
+      min-width: 2680px;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+    th, td {
+      border-bottom: 1px solid var(--line-soft);
+      padding: 7px 8px;
+      text-align: left;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: var(--head-2);
+      color: #26384f;
+      font-weight: 650;
+    }
+    tbody tr:hover td { background: #f3f8ff; }
+    .time { width: 160px; }
+    .category { width: 120px; }
+    .source { width: 190px; }
+    .event { width: 82px; }
+    .action { width: 135px; }
+    .account { width: 180px; }
+    .short { width: 120px; }
+    .logon { width: 170px; }
+    .ip { width: 150px; }
+    .workstation { width: 170px; }
+    .process { width: 260px; }
+    .service { width: 220px; }
+    .command { width: 360px; }
+    .status-code { width: 120px; }
+    .reason { width: 240px; }
+    .sid { width: 260px; }
+    .provider { width: 230px; }
+    .message { width: 520px; }
+    .details { width: 320px; }
+    .empty { padding: 18px; color: var(--muted); }
+    .bad-text { color: var(--bad); }
+  </style>
+  <link rel="stylesheet" href="/nav.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header>
+    <h1>WinTraceLens</h1>
+    <div class="app-meta">
+      <span class="release-badge" data-app-version>1.0 基础版</span>
+      <span class="permission-badge unknown" data-admin-status>权限检测中</span>
+      <span class="module-title">Windows 事件日志分析</span>
+    </div>
+  </header>
+  <main>
+    <div class="toolbar">
+      <nav class="top-nav" aria-label="主要功能">
+        <a class="nav-link" href="/">进程信息</a>
+        <a class="nav-link" href="/host.html">主机信息</a>
+        <a class="nav-link" href="/findings.html">关注项</a>
+        <a class="nav-link" href="/threat.html">威胁分析</a>
+        <a class="nav-link" href="/filetrace.html">文件痕迹</a>
+        <a class="nav-link" href="/history.html">历史通信</a>
+        <a class="nav-link" aria-current="page" href="/security.html">事件日志</a>
+        <a class="nav-link" href="/health.html">日志健康</a>
+        <a class="nav-link" href="/yara.html">YARA扫描</a>
+        <a class="nav-link" href="/ai.html">AI分析</a>
+      </nav>
+      <span class="current-module">当前：事件日志</span>
+      <span class="range-label">日志时间</span>
+      <input id="start-date" class="date-input" type="date" title="开始日期">
+      <span class="range-label">至</span>
+      <input id="end-date" class="date-input" type="date" title="结束日期">
+      <button id="range-1d" class="secondary">近1天</button>
+      <button id="range-7d" class="secondary">近7天</button>
+      <button id="range-30d" class="secondary">近30天</button>
+      <button id="range-clear" class="secondary">不限时间</button>
+      <span class="range-label">最多</span>
+      <select id="max-records" class="limit-select" title="每类日志最多读取条数">
+        <option value="100">100条</option>
+        <option value="300" selected>300条</option>
+        <option value="1000">1000条</option>
+        <option value="5000">5000条</option>
+      </select>
+      <button id="refresh">刷新事件日志</button>
+      <button id="export-csv" class="secondary" disabled>导出 CSV</button>
+      <input id="filter" placeholder="按分类、动作、账户、服务、命令、SQL、PowerShell、来源 IP 过滤">
+      <span id="status" class="status">尚未加载</span>
+    </div>
+    <div class="tabs">
+      <button class="tab active" data-tab="all" data-label="全部">全部</button>
+      <button class="tab" data-tab="logon" data-label="登录/注销">登录/注销</button>
+      <button class="tab" data-tab="rdp" data-label="RDP">RDP</button>
+      <button class="tab" data-tab="service" data-label="服务创建">服务创建</button>
+      <button class="tab" data-tab="user" data-label="用户账户">用户账户</button>
+      <button class="tab" data-tab="powershell" data-label="PowerShell">PowerShell</button>
+      <button class="tab" data-tab="sql" data-label="SQL Server">SQL Server</button>
+    </div>
+    <div id="summary" class="summary"></div>
+    <section class="panel">
+      <div id="table" class="table-wrap">
+        <div class="empty">正在加载事件日志...</div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const table = document.getElementById('table');
+    const filter = document.getElementById('filter');
+    const statusEl = document.getElementById('status');
+    const summaryEl = document.getElementById('summary');
+    const exportCSV = document.getElementById('export-csv');
+    const startDate = document.getElementById('start-date');
+    const endDate = document.getElementById('end-date');
+    const maxRecords = document.getElementById('max-records');
+    let events = [];
+    let collectionErrors = [];
+    let activeTab = 'all';
+
+    function text(value) {
+      return value == null ? '' : String(value);
+    }
+
+    function escapeCell(value) {
+      return text(value).replace(/[&<>"']/g, ch => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[ch]));
+    }
+
+    function visibleItems() {
+      const tabItems = events.filter(tabMatches);
+      const q = filter.value.trim().toLowerCase();
+      if (!q) return tabItems;
+      return tabItems.filter(item => Object.values(item).some(v => text(v).toLowerCase().includes(q)));
+    }
+
+    function tabMatches(item) {
+      if (activeTab === 'all') return true;
+      if (activeTab === 'logon') {
+        return ['登录', '登录失败', '注销', '特权登录', '工作站锁定', '工作站解锁'].includes(item.category);
+      }
+      if (activeTab === 'rdp') return text(item.category).includes('RDP') || text(item.action).includes('RDP');
+      if (activeTab === 'service') return item.category === '服务创建';
+      if (activeTab === 'user') return item.category === '用户账户';
+      if (activeTab === 'powershell') return item.category === 'PowerShell日志';
+      if (activeTab === 'sql') return item.category === 'SQL Server日志';
+      return true;
+    }
+
+    function tabCount(tab) {
+      const previous = activeTab;
+      activeTab = tab;
+      const count = events.filter(tabMatches).length;
+      activeTab = previous;
+      return count;
+    }
+
+    function updateTabs() {
+      document.querySelectorAll('button.tab').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.tab === activeTab);
+        btn.textContent = `${btn.dataset.label} ${tabCount(btn.dataset.tab)}`;
+      });
+    }
+
+    function renderSummary(items) {
+      const success = items.filter(x => x.action === '登录成功').length;
+      const failed = items.filter(x => x.action === '登录失败').length;
+      const privileged = items.filter(x => x.action === '特权登录').length;
+      const rdp = items.filter(x => text(x.category).includes('RDP') || text(x.logonType) === '10' || text(x.action).includes('RDP')).length;
+      const service = items.filter(x => x.category === '服务创建').length;
+      const user = items.filter(x => x.category === '用户账户').length;
+      const ps = items.filter(x => x.category === 'PowerShell日志').length;
+      const sql = items.filter(x => x.category === 'SQL Server日志').length;
+      const errors = collectionErrors.map(x => `<span class="count warn" title="${escapeCell(x)}">${escapeCell(x)}</span>`).join('');
+      summaryEl.innerHTML = `
+        <span class="count ok">登录成功 ${success}</span>
+        <span class="count bad">登录失败 ${failed}</span>
+        <span class="count warn">特权登录 ${privileged}</span>
+        <span class="count warn">RDP ${rdp}</span>
+        <span class="count warn">服务创建 ${service}</span>
+        <span class="count warn">用户账户 ${user}</span>
+        <span class="count warn">PowerShell ${ps}</span>
+        <span class="count warn">SQL Server ${sql}</span>
+        ${errors}
+      `;
+    }
+
+    function render() {
+      const items = visibleItems();
+      updateTabs();
+      renderSummary(items);
+      const tabTotal = events.filter(tabMatches).length;
+      const activeLabel = document.querySelector(`button.tab[data-tab="${activeTab}"]`)?.dataset.label || '全部';
+      statusEl.textContent = `${activeLabel} ${items.length} / ${tabTotal}`;
+      if (!items.length) {
+        table.innerHTML = '<div class="empty">没有匹配的事件日志</div>';
+        return;
+      }
+      table.innerHTML = `<table><thead><tr>
+        <th class="time">时间</th><th class="category">分类</th><th class="source">来源</th><th class="event">事件ID</th><th class="action">动作</th>
+        <th class="account">账户/实例</th><th class="short">域</th><th class="account">操作者</th><th class="short">登录类型</th><th class="logon">登录类型说明</th>
+        <th class="ip">来源 IP</th><th class="short">来源端口</th><th class="workstation">工作站</th><th class="process">进程</th>
+        <th class="service">服务名</th><th class="command">命令/路径</th><th class="short">认证包</th><th class="status-code">状态</th>
+        <th class="reason">失败原因</th><th class="sid">目标 SID</th><th class="provider">Provider</th><th class="short">级别</th>
+        <th class="message">消息</th><th class="details">详情</th>
+      </tr></thead><tbody>${items.map(x => `<tr>
+        <td class="time" title="${escapeCell(x.time)}">${escapeCell(x.time)}</td>
+        <td class="category" title="${escapeCell(x.category)}">${escapeCell(x.category)}</td>
+        <td class="source" title="${escapeCell(x.source)}">${escapeCell(x.source)}</td>
+        <td class="event" title="${escapeCell(x.eventId)}">${escapeCell(x.eventId)}</td>
+        <td class="action" title="${escapeCell(x.action)}">${escapeCell(x.action)}</td>
+        <td class="account" title="${escapeCell(x.account)}">${escapeCell(x.account)}</td>
+        <td class="short" title="${escapeCell(x.domain)}">${escapeCell(x.domain)}</td>
+        <td class="account" title="${escapeCell(x.subject)}">${escapeCell(x.subject)}</td>
+        <td class="short" title="${escapeCell(x.logonType)}">${escapeCell(x.logonType)}</td>
+        <td class="logon" title="${escapeCell(x.logonTypeName)}">${escapeCell(x.logonTypeName)}</td>
+        <td class="ip" title="${escapeCell(x.sourceIp)}">${escapeCell(x.sourceIp)}</td>
+        <td class="short" title="${escapeCell(x.sourcePort)}">${escapeCell(x.sourcePort)}</td>
+        <td class="workstation" title="${escapeCell(x.workstation)}">${escapeCell(x.workstation)}</td>
+        <td class="process" title="${escapeCell(x.process)}">${escapeCell(x.process)}</td>
+        <td class="service" title="${escapeCell(x.serviceName)}">${escapeCell(x.serviceName)}</td>
+        <td class="command" title="${escapeCell(x.command)}">${escapeCell(x.command)}</td>
+        <td class="short" title="${escapeCell(x.authPackage)}">${escapeCell(x.authPackage)}</td>
+        <td class="status-code" title="${escapeCell(x.status)}">${escapeCell(x.status)}</td>
+        <td class="reason" title="${escapeCell(x.failureReason)}">${escapeCell(x.failureReason)}</td>
+        <td class="sid" title="${escapeCell(x.targetSid)}">${escapeCell(x.targetSid)}</td>
+        <td class="provider" title="${escapeCell(x.provider)}">${escapeCell(x.provider)}</td>
+        <td class="short" title="${escapeCell(x.level)}">${escapeCell(x.level)}</td>
+        <td class="message" title="${escapeCell(x.message)}">${escapeCell(x.message)}</td>
+        <td class="details" title="${escapeCell(x.details)}">${escapeCell(x.details)}</td>
+      </tr>`).join('')}</tbody></table>`;
+    }
+
+    async function loadJSON(url, options) {
+      const res = await fetch(url, options || { cache: 'no-store' });
+      if (!res.ok) {
+        const msg = await res.text();
+        throw new Error(msg || res.statusText);
+      }
+      return res.json();
+    }
+
+    function downloadCSV(url) {
+      const a = document.createElement('a');
+      a.href = url;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }
+
+    function formatDate(date) {
+      const y = date.getFullYear();
+      const m = String(date.getMonth() + 1).padStart(2, '0');
+      const d = String(date.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    }
+
+    function setRecentDays(days) {
+      const end = new Date();
+      const start = new Date();
+      start.setDate(end.getDate() - Math.max(0, days - 1));
+      startDate.value = formatDate(start);
+      endDate.value = formatDate(end);
+    }
+
+    function validateDateRange() {
+      if (startDate.value && endDate.value && startDate.value > endDate.value) {
+        throw new Error('结束日期不能早于开始日期');
+      }
+    }
+
+    function appendDateRange(params) {
+      if (startDate.value) params.set('start', startDate.value);
+      if (endDate.value) params.set('end', endDate.value);
+      return params;
+    }
+
+    function rangeText() {
+      if (!startDate.value && !endDate.value) return '全部时间';
+      if (startDate.value && endDate.value) return `${startDate.value} 至 ${endDate.value}`;
+      if (startDate.value) return `${startDate.value} 之后`;
+      return `${endDate.value} 之前`;
+    }
+
+    function collectionQueryString() {
+      validateDateRange();
+      return appendDateRange(new URLSearchParams({ max: maxRecords.value || '300' })).toString();
+    }
+
+    function queryString() {
+      validateDateRange();
+      const params = new URLSearchParams({ max: maxRecords.value || '300', category: activeTab });
+      const q = filter.value.trim();
+      if (q) params.set('q', q);
+      return appendDateRange(params).toString();
+    }
+
+    async function load() {
+      let params;
+      try {
+        params = collectionQueryString();
+      } catch (err) {
+        statusEl.textContent = err.message;
+        table.innerHTML = `<div class="empty bad-text">${escapeCell(err.message)}</div>`;
+        return;
+      }
+      statusEl.textContent = `正在读取 Windows 事件日志（${rangeText()}，最多 ${maxRecords.value || '300'} 条）...`;
+      exportCSV.disabled = true;
+      summaryEl.innerHTML = '';
+      table.innerHTML = `<div class="empty">正在读取 ${escapeCell(rangeText())} 的登录、RDP、服务、用户、PowerShell、SQL Server 相关事件，最多 ${escapeCell(maxRecords.value || '300')} 条...</div>`;
+      const data = await loadJSON(`/api/security/events?${params}`);
+      events = data.events || [];
+      collectionErrors = data.collectionErrors || [];
+      exportCSV.disabled = false;
+      statusEl.textContent = `生成时间 ${data.generatedAt || ''}，范围 ${rangeText()}，事件 ${events.length}`;
+      render();
+    }
+
+    document.getElementById('refresh').addEventListener('click', () => {
+      load().catch(err => {
+        table.innerHTML = `<div class="empty bad-text">${escapeCell(err.message)}</div>`;
+        statusEl.textContent = '加载失败';
+      });
+    });
+
+    exportCSV.addEventListener('click', () => {
+      try {
+        statusEl.textContent = '正在生成 CSV...';
+        downloadCSV(`/api/security/events.csv?${queryString()}`);
+      } catch (err) {
+        statusEl.textContent = err.message;
+      }
+    });
+
+    document.getElementById('range-1d').addEventListener('click', () => {
+      setRecentDays(1);
+      load().catch(err => {
+        table.innerHTML = `<div class="empty bad-text">${escapeCell(err.message)}</div>`;
+        statusEl.textContent = '加载失败';
+      });
+    });
+
+    document.getElementById('range-7d').addEventListener('click', () => {
+      setRecentDays(7);
+      load().catch(err => {
+        table.innerHTML = `<div class="empty bad-text">${escapeCell(err.message)}</div>`;
+        statusEl.textContent = '加载失败';
+      });
+    });
+
+    document.getElementById('range-30d').addEventListener('click', () => {
+      setRecentDays(30);
+      load().catch(err => {
+        table.innerHTML = `<div class="empty bad-text">${escapeCell(err.message)}</div>`;
+        statusEl.textContent = '加载失败';
+      });
+    });
+
+    document.getElementById('range-clear').addEventListener('click', () => {
+      startDate.value = '';
+      endDate.value = '';
+      load().catch(err => {
+        table.innerHTML = `<div class="empty bad-text">${escapeCell(err.message)}</div>`;
+        statusEl.textContent = '加载失败';
+      });
+    });
+
+    document.querySelectorAll('button.tab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        activeTab = btn.dataset.tab;
+        render();
+      });
+    });
+
+    filter.addEventListener('input', render);
+    startDate.addEventListener('change', () => load().catch(err => {
+      table.innerHTML = `<div class="empty bad-text">${escapeCell(err.message)}</div>`;
+      statusEl.textContent = '加载失败';
+    }));
+    endDate.addEventListener('change', () => load().catch(err => {
+      table.innerHTML = `<div class="empty bad-text">${escapeCell(err.message)}</div>`;
+      statusEl.textContent = '加载失败';
+    }));
+    maxRecords.addEventListener('change', () => load().catch(err => {
+      table.innerHTML = `<div class="empty bad-text">${escapeCell(err.message)}</div>`;
+      statusEl.textContent = '加载失败';
+    }));
+
+    setRecentDays(7);
+    load().catch(err => {
+      table.innerHTML = `<div class="empty bad-text">${escapeCell(err.message)}</div>`;
+      statusEl.textContent = '加载失败';
+    });
+  </script>
+</body>
+</html>

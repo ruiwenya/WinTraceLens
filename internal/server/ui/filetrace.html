@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WinTraceLens - 文件痕迹</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --panel: #ffffff;
+      --line: #d9e0ea;
+      --line-soft: #edf1f6;
+      --text: #182235;
+      --muted: #5b6678;
+      --head: #243447;
+      --head-2: #edf3f8;
+      --accent: #1769aa;
+      --accent-dark: #0f4e82;
+      --ok: #176b43;
+      --warn: #9a5200;
+      --bad: #a41220;
+      --info: #2b5b91;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+      font-size: 14px;
+      letter-spacing: 0;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 13px 18px;
+      background: var(--head);
+      color: #fff;
+    }
+    h1 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 650;
+      letter-spacing: 0;
+    }
+    main {
+      display: grid;
+      grid-template-rows: auto auto auto auto minmax(0, 1fr);
+      gap: 10px;
+      height: calc(100vh - 48px);
+      padding: 12px;
+    }
+    .toolbar, .scopebar, .tabs, .summary {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    input, select, textarea {
+      width: min(460px, 100%);
+      height: 34px;
+      padding: 6px 10px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: #fff;
+      color: var(--text);
+      font: inherit;
+    }
+    textarea {
+      width: min(720px, 100%);
+      height: 38px;
+      min-height: 38px;
+      max-height: 88px;
+      resize: vertical;
+      line-height: 20px;
+    }
+    select {
+      width: 132px;
+      min-width: 132px;
+    }
+    button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: 34px;
+      padding: 0 12px;
+      border: 1px solid var(--accent-dark);
+      border-radius: 4px;
+      background: var(--accent);
+      color: #fff;
+      cursor: pointer;
+      font: inherit;
+    }
+    button.secondary, button.tab {
+      border-color: var(--line);
+      background: #fff;
+      color: var(--text);
+    }
+    button.tab.active {
+      border-color: var(--accent);
+      background: #e8f2fb;
+      color: var(--accent-dark);
+    }
+    button:hover { filter: brightness(0.96); }
+    .status {
+      color: var(--muted);
+      font-size: 13px;
+      white-space: nowrap;
+    }
+    .scopebar {
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: #fff;
+    }
+    .scopebar label {
+      font-weight: 650;
+      color: #26384f;
+      white-space: nowrap;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      height: 26px;
+      padding: 0 9px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fff;
+      color: var(--text);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .badge.ok { border-color: #b8d7c8; background: #edf8f2; color: var(--ok); }
+    .badge.warn { border-color: #f0ce9f; background: #fff7e8; color: var(--warn); }
+    .badge.bad { border-color: #edb4bd; background: #fff0f2; color: var(--bad); }
+    .badge.info { border-color: #c7d7ee; background: #eef5fd; color: var(--info); }
+    .panel {
+      min-height: 0;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: var(--panel);
+      overflow: hidden;
+    }
+    .table-wrap {
+      height: 100%;
+      overflow: auto;
+    }
+    table {
+      width: 100%;
+      min-width: 1660px;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+    th, td {
+      border-bottom: 1px solid var(--line-soft);
+      padding: 8px 10px;
+      text-align: left;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: var(--head-2);
+      color: #26384f;
+      font-weight: 650;
+    }
+    tbody tr:hover td { background: #f3f8ff; }
+    tbody tr.high td { background: #fff0f2; }
+    tbody tr.medium td { background: #fff9ed; }
+    .category { width: 112px; }
+    .source { width: 130px; }
+    .risk { width: 96px; }
+    .name { width: 220px; }
+    .time { width: 150px; }
+    .size { width: 96px; }
+    .path { width: 420px; }
+    .reason { width: 260px; }
+    .details { width: 260px; }
+    .empty {
+      padding: 18px;
+      color: var(--muted);
+    }
+    .bad { color: var(--bad); }
+  </style>
+  <link rel="stylesheet" href="/nav.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header>
+    <h1>WinTraceLens</h1>
+    <div class="app-meta">
+      <span class="release-badge" data-app-version>1.0 基础版</span>
+      <span class="permission-badge unknown" data-admin-status>权限检测中</span>
+      <span class="module-title">最近文件与运行痕迹</span>
+    </div>
+  </header>
+
+  <main>
+    <div class="toolbar">
+      <nav class="top-nav" aria-label="主要功能">
+        <a class="nav-link" href="/">进程信息</a>
+        <a class="nav-link" href="/host.html">主机信息</a>
+        <a class="nav-link" href="/findings.html">关注项</a>
+        <a class="nav-link" href="/threat.html">威胁分析</a>
+        <a class="nav-link" aria-current="page" href="/filetrace.html">文件痕迹</a>
+        <a class="nav-link" href="/history.html">历史通信</a>
+        <a class="nav-link" href="/security.html">事件日志</a>
+        <a class="nav-link" href="/health.html">日志健康</a>
+        <a class="nav-link" href="/yara.html">YARA扫描</a>
+        <a class="nav-link" href="/ai.html">AI分析</a>
+      </nav>
+      <span class="current-module">当前：文件痕迹</span>
+      <select id="hours" title="最近时间范围">
+        <option value="24">最近 24 小时</option>
+        <option value="72" selected>最近 72 小时</option>
+        <option value="168">最近 7 天</option>
+        <option value="720">最近 30 天</option>
+      </select>
+      <select id="max-records" title="最多读取条数">
+        <option value="300">最多 300</option>
+        <option value="500" selected>最多 500</option>
+        <option value="1000">最多 1000</option>
+        <option value="2000">最多 2000</option>
+      </select>
+      <button id="refresh">刷新文件痕迹</button>
+      <button id="export-csv" class="secondary" disabled>导出 CSV</button>
+      <input id="filter" placeholder="按文件名、路径、来源、可疑原因过滤">
+      <span id="status" class="status">尚未加载</span>
+    </div>
+
+    <div class="scopebar">
+      <label for="modified-roots">最近修改扫描目录</label>
+      <textarea id="modified-roots" placeholder="默认扫描 Downloads、Desktop、AppData、ProgramData；也可输入 C:\、D:\ 或 C:\Windows，每行一个目录"></textarea>
+      <button id="pick-modified-root" class="secondary">选择目录</button>
+      <button id="clear-modified-roots" class="secondary">恢复默认</button>
+      <span id="scope-note" class="status">默认扫描常见落地点</span>
+    </div>
+
+    <div class="tabs">
+      <button class="tab active" data-tab="all" data-label="全部">全部</button>
+      <button class="tab" data-tab="suspicious" data-label="可疑项">可疑项</button>
+      <button class="tab" data-tab="modified" data-label="最近修改">最近修改</button>
+      <button class="tab" data-tab="run" data-label="最近运行">最近运行</button>
+      <button class="tab" data-tab="temp" data-label="Temp 文件">Temp 文件</button>
+    </div>
+
+    <div id="summary" class="summary"></div>
+
+    <section class="panel">
+      <div id="table" class="table-wrap">
+        <div class="empty">正在加载文件痕迹...</div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const table = document.getElementById('table');
+    const filter = document.getElementById('filter');
+    const statusEl = document.getElementById('status');
+    const summaryEl = document.getElementById('summary');
+    const exportCSV = document.getElementById('export-csv');
+    const hoursEl = document.getElementById('hours');
+    const maxRecords = document.getElementById('max-records');
+    const modifiedRoots = document.getElementById('modified-roots');
+    const pickModifiedRoot = document.getElementById('pick-modified-root');
+    const clearModifiedRoots = document.getElementById('clear-modified-roots');
+    const scopeNote = document.getElementById('scope-note');
+    let records = [];
+    let collectionErrors = [];
+    let activeTab = 'all';
+
+    function text(value) {
+      return value == null ? '' : String(value);
+    }
+
+    function escapeCell(value) {
+      return text(value).replace(/[&<>"']/g, ch => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[ch]));
+    }
+
+    function tabMatches(item) {
+      if (activeTab === 'modified') return item.category === '最近修改文件';
+      if (activeTab === 'run') return item.category === '最近运行文件';
+      if (activeTab === 'temp') return item.category === 'Temp 临时文件';
+      if (activeTab === 'suspicious') return !!item.suspicion;
+      return true;
+    }
+
+    function visibleItems() {
+      const q = filter.value.trim().toLowerCase();
+      return records.filter(item => {
+        if (!tabMatches(item)) return false;
+        if (!q) return true;
+        return Object.values(item).some(v => text(v).toLowerCase().includes(q));
+      });
+    }
+
+    function countFor(tab) {
+      const previous = activeTab;
+      activeTab = tab;
+      const count = records.filter(tabMatches).length;
+      activeTab = previous;
+      return count;
+    }
+
+    function updateTabs() {
+      document.querySelectorAll('button.tab').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.tab === activeTab);
+        btn.textContent = `${btn.dataset.label} ${countFor(btn.dataset.tab)}`;
+      });
+    }
+
+    function riskBadge(value) {
+      if (value === '高') return '<span class="badge bad">高</span>';
+      if (value === '中') return '<span class="badge warn">中</span>';
+      if (value === '低') return '<span class="badge info">低</span>';
+      return '<span class="badge ok">-</span>';
+    }
+
+    function rowClass(item) {
+      if (item.suspicion === '高') return 'high';
+      if (item.suspicion === '中') return 'medium';
+      return '';
+    }
+
+    function formatSize(value) {
+      const n = Number(value || 0);
+      if (!n) return '';
+      if (n >= 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+      if (n >= 1024) return `${(n / 1024).toFixed(1)} KB`;
+      return `${n} B`;
+    }
+
+    function splitRoots(value) {
+      return text(value)
+        .split(/[\r\n;]+/)
+        .map(x => x.trim().replace(/^['"]|['"]$/g, ''))
+        .filter(Boolean)
+        .filter((x, index, arr) => arr.findIndex(y => y.toLowerCase() === x.toLowerCase()) === index)
+        .slice(0, 8);
+    }
+
+    function setRoots(roots) {
+      modifiedRoots.value = roots.join('\n');
+      updateScopeNote();
+    }
+
+    function updateScopeNote() {
+      const roots = splitRoots(modifiedRoots.value);
+      scopeNote.textContent = roots.length
+        ? `已选择 ${roots.length} 个目录：${roots.join('；')}`
+        : '默认扫描常见落地点';
+    }
+
+    function renderSummary() {
+      const modified = records.filter(x => x.category === '最近修改文件').length;
+      const run = records.filter(x => x.category === '最近运行文件').length;
+      const temp = records.filter(x => x.category === 'Temp 临时文件').length;
+      const suspicious = records.filter(x => x.suspicion).length;
+      const errors = collectionErrors.map(x => `<span class="bad" title="${escapeCell(x)}">${escapeCell(x)}</span>`).join('');
+      summaryEl.innerHTML = [
+        `<span class="badge info">总数 ${records.length}</span>`,
+        `<span class="badge warn">可疑 ${suspicious}</span>`,
+        `<span class="badge info">最近修改 ${modified}</span>`,
+        `<span class="badge info">最近运行 ${run}</span>`,
+        `<span class="badge info">Temp ${temp}</span>`,
+        errors
+      ].join('');
+    }
+
+    function render() {
+      updateTabs();
+      renderSummary();
+      const items = visibleItems();
+      const tabTotal = records.filter(tabMatches).length;
+      statusEl.textContent = `显示 ${items.length} / ${tabTotal}`;
+      if (!items.length) {
+        table.innerHTML = '<div class="empty">没有匹配的文件痕迹</div>';
+        return;
+      }
+      table.innerHTML = `<table>
+        <thead><tr>
+          <th class="category">分类</th><th class="source">来源</th><th class="risk">可疑</th><th class="name">文件名</th>
+          <th class="time">修改时间</th><th class="time">最近运行</th><th class="time">创建时间</th><th class="size">大小</th>
+          <th class="path">路径</th><th class="reason">原因</th><th class="details">详情</th>
+        </tr></thead>
+        <tbody>${items.map(item => `<tr class="${rowClass(item)}">
+          <td class="category" title="${escapeCell(item.category)}">${escapeCell(item.category)}</td>
+          <td class="source" title="${escapeCell(item.source)}">${escapeCell(item.source)}</td>
+          <td class="risk">${riskBadge(item.suspicion)}</td>
+          <td class="name" title="${escapeCell(item.name)}">${escapeCell(item.name)}</td>
+          <td class="time" title="${escapeCell(item.modified)}">${escapeCell(item.modified)}</td>
+          <td class="time" title="${escapeCell(item.lastRun)}">${escapeCell(item.lastRun)}</td>
+          <td class="time" title="${escapeCell(item.created)}">${escapeCell(item.created)}</td>
+          <td class="size" title="${escapeCell(item.size)}">${escapeCell(formatSize(item.size))}</td>
+          <td class="path" title="${escapeCell(item.path)}">${escapeCell(item.path)}</td>
+          <td class="reason" title="${escapeCell(item.reason)}">${escapeCell(item.reason)}</td>
+          <td class="details" title="${escapeCell(item.details)}">${escapeCell(item.details)}</td>
+        </tr>`).join('')}</tbody>
+      </table>`;
+    }
+
+    async function loadJSON(url, options) {
+      const res = await fetch(url, options || { cache: 'no-store' });
+      if (!res.ok) throw new Error(await res.text() || res.statusText);
+      return res.json();
+    }
+
+    async function chooseFolder(title) {
+      const params = new URLSearchParams({ title });
+      const data = await loadJSON(`/api/dialog/folder?${params}`);
+      if (data.error) throw new Error(data.error);
+      return data.ok ? data.path : '';
+    }
+
+    function queryString(includeFilter) {
+      const params = new URLSearchParams({
+        max: maxRecords.value || '500',
+        hours: hoursEl.value || '72',
+        category: activeTab
+      });
+      splitRoots(modifiedRoots.value).forEach(root => params.append('root', root));
+      const q = filter.value.trim();
+      if (includeFilter && q) params.set('q', q);
+      return params.toString();
+    }
+
+    function downloadCSV(url) {
+      const a = document.createElement('a');
+      a.href = url;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }
+
+    async function load() {
+      statusEl.textContent = '正在采集文件痕迹...';
+      exportCSV.disabled = true;
+      summaryEl.innerHTML = '';
+      const roots = splitRoots(modifiedRoots.value);
+      table.innerHTML = roots.length
+        ? `<div class="empty">正在扫描自定义目录的最近修改文件，并采集 Temp、Prefetch 和 Recent 快捷方式...</div>`
+        : '<div class="empty">正在扫描 Temp、Downloads、Desktop、Prefetch 和 Recent 快捷方式...</div>';
+      const data = await loadJSON(`/api/files/traces?${queryString(false)}`);
+      records = data.records || [];
+      collectionErrors = data.collectionErrors || [];
+      exportCSV.disabled = false;
+      statusEl.textContent = `生成时间 ${data.generatedAt || ''}，记录 ${records.length}`;
+      render();
+    }
+
+    document.getElementById('refresh').addEventListener('click', () => {
+      load().catch(err => {
+        table.innerHTML = `<div class="empty bad">${escapeCell(err.message)}</div>`;
+        statusEl.textContent = '加载失败';
+      });
+    });
+
+    pickModifiedRoot.addEventListener('click', async () => {
+      try {
+        const path = await chooseFolder('选择最近修改文件扫描目录');
+        if (!path) return;
+        const roots = splitRoots(modifiedRoots.value);
+        if (!roots.some(root => root.toLowerCase() === path.toLowerCase())) {
+          roots.push(path);
+        }
+        setRoots(roots);
+        activeTab = 'modified';
+        await load();
+      } catch (err) {
+        statusEl.textContent = err.message;
+      }
+    });
+
+    clearModifiedRoots.addEventListener('click', () => {
+      setRoots([]);
+      load().catch(err => {
+        table.innerHTML = `<div class="empty bad">${escapeCell(err.message)}</div>`;
+        statusEl.textContent = '加载失败';
+      });
+    });
+
+    modifiedRoots.addEventListener('input', updateScopeNote);
+    exportCSV.addEventListener('click', () => {
+      statusEl.textContent = '正在生成 CSV...';
+      downloadCSV(`/api/files/traces.csv?${queryString(true)}`);
+    });
+
+    document.querySelectorAll('button.tab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        activeTab = btn.dataset.tab;
+        render();
+      });
+    });
+    filter.addEventListener('input', render);
+    hoursEl.addEventListener('change', () => load().catch(err => {
+      table.innerHTML = `<div class="empty bad">${escapeCell(err.message)}</div>`;
+      statusEl.textContent = '加载失败';
+    }));
+    maxRecords.addEventListener('change', () => load().catch(err => {
+      table.innerHTML = `<div class="empty bad">${escapeCell(err.message)}</div>`;
+      statusEl.textContent = '加载失败';
+    }));
+
+    updateScopeNote();
+    load().catch(err => {
+      table.innerHTML = `<div class="empty bad">${escapeCell(err.message)}</div>`;
+      statusEl.textContent = '加载失败';
+    });
+  </script>
+</body>
+</html>

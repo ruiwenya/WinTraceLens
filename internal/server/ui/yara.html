@@ -1,0 +1,991 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WinTraceLens - YARA扫描</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --panel: #ffffff;
+      --line: #d9e0ea;
+      --line-soft: #edf1f6;
+      --text: #182235;
+      --muted: #5b6678;
+      --head: #243447;
+      --head-2: #edf3f8;
+      --accent: #1769aa;
+      --accent-dark: #0f4e82;
+      --ok: #176b43;
+      --warn: #9a5200;
+      --bad: #a41220;
+      --info: #2b5b91;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+      font-size: 14px;
+      letter-spacing: 0;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 13px 18px;
+      background: var(--head);
+      color: #fff;
+    }
+    h1 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 650;
+      letter-spacing: 0;
+    }
+    main {
+      display: grid;
+      grid-template-rows: auto minmax(470px, 1.05fr) minmax(350px, 1fr) minmax(230px, 0.8fr);
+      gap: 10px;
+      height: calc(100vh - 48px);
+      padding: 12px;
+    }
+    .toolbar,
+    .actions,
+    .check-row,
+    .summary,
+    .inline-row,
+    .metric-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    input, textarea, select {
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: #fff;
+      color: var(--text);
+      font: inherit;
+    }
+    input, select {
+      height: 34px;
+      padding: 6px 10px;
+    }
+    textarea {
+      width: 100%;
+      min-height: 76px;
+      padding: 8px 10px;
+      resize: vertical;
+      line-height: 1.45;
+    }
+    button, a.button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: 34px;
+      padding: 0 12px;
+      border: 1px solid var(--accent-dark);
+      border-radius: 4px;
+      background: var(--accent);
+      color: #fff;
+      cursor: pointer;
+      font: inherit;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    button.secondary {
+      border-color: var(--line);
+      background: #fff;
+      color: var(--text);
+    }
+    button.warn {
+      border-color: #b76700;
+      background: #b76700;
+    }
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.45;
+    }
+    button:hover:not(:disabled) { filter: brightness(0.96); }
+    label {
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .toolbar input {
+      flex: 1 1 260px;
+      min-width: 220px;
+    }
+    .status {
+      margin-left: auto;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .setup-grid {
+      display: grid;
+      grid-template-columns: minmax(480px, 1fr) minmax(520px, 1fr);
+      gap: 10px;
+      min-height: 0;
+    }
+    .panel {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      min-height: 0;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel);
+      overflow: hidden;
+      box-shadow: 0 1px 3px rgba(24, 34, 53, 0.06);
+    }
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      background: #fbfcfe;
+    }
+    .panel-title {
+      font-weight: 650;
+      color: #26384f;
+    }
+    .panel-body {
+      display: grid;
+      gap: 10px;
+      min-height: 0;
+      padding: 12px;
+      overflow: auto;
+    }
+    .rules-body {
+      grid-template-rows: auto auto auto minmax(220px, 1fr);
+    }
+    .file-body {
+      grid-template-rows: auto auto auto auto auto;
+    }
+    .process-body {
+      grid-template-rows: auto auto auto minmax(230px, 1fr) auto;
+    }
+    .field {
+      display: grid;
+      gap: 6px;
+      min-width: 0;
+    }
+    .field-row {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(100px, 1fr));
+      gap: 8px;
+    }
+    .inline-row input {
+      flex: 1 1 220px;
+      min-width: 180px;
+    }
+    .check-row label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      height: 28px;
+      padding: 0 8px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: #fff;
+      color: var(--text);
+    }
+    .check-row input {
+      width: 14px;
+      height: 14px;
+      padding: 0;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      max-width: 100%;
+      min-height: 26px;
+      padding: 4px 9px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fff;
+      color: var(--text);
+      font-size: 12px;
+      line-height: 1.3;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .badge.ok { border-color: #b8d7c8; background: #edf8f2; color: var(--ok); }
+    .badge.warn { border-color: #f0ce9f; background: #fff7e8; color: var(--warn); }
+    .badge.bad { border-color: #edb4bd; background: #fff0f2; color: var(--bad); }
+    .badge.info { border-color: #c7d7ee; background: #eef5fd; color: var(--info); }
+    .message {
+      display: grid;
+      gap: 4px;
+      min-height: 34px;
+      max-height: 92px;
+      overflow: auto;
+      padding: 8px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: #f8fafc;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .message.bad { border-color: #edb4bd; background: #fff0f2; color: var(--bad); }
+    .message.ok { border-color: #b8d7c8; background: #edf8f2; color: var(--ok); }
+    .selected-note {
+      min-height: 34px;
+      padding: 8px;
+      border: 1px solid #c7d7ee;
+      border-radius: 4px;
+      background: #eef5fd;
+      color: var(--info);
+      font-size: 13px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .table-wrap {
+      min-height: 0;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: #fff;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+    th, td {
+      border-bottom: 1px solid var(--line-soft);
+      padding: 7px 8px;
+      text-align: left;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: var(--head-2);
+      color: #26384f;
+      font-weight: 650;
+    }
+    tbody tr:hover td { background: #f3f8ff; }
+    tbody tr.hit td { background: #fff9ed; }
+    tbody tr.error td { background: #fff0f2; }
+    .rules-table { min-width: 900px; }
+    .process-table { min-width: 1200px; }
+    .result-table { min-width: 1740px; }
+    .select-col { width: 42px; text-align: center; }
+    .pid { width: 80px; }
+    .name { width: 190px; }
+    .path { width: 650px; }
+    .rule-file { width: 260px; }
+    .result { width: 96px; }
+    .rules { width: 210px; }
+    .process { width: 180px; }
+    .duration { width: 90px; }
+    .output { width: 390px; }
+    .empty {
+      padding: 16px;
+      color: var(--muted);
+    }
+    .results {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      min-height: 0;
+    }
+    .summary {
+      min-height: 38px;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+    }
+    @media (max-width: 1180px) {
+      main { height: auto; min-height: calc(100vh - 48px); }
+      .setup-grid { grid-template-columns: 1fr; }
+      .field-row { grid-template-columns: 1fr; }
+      .status { margin-left: 0; }
+    }
+  </style>
+  <link rel="stylesheet" href="/nav.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header>
+    <h1>WinTraceLens</h1>
+    <div class="app-meta">
+      <span class="release-badge" data-app-version>1.0 基础版</span>
+      <span class="permission-badge unknown" data-admin-status>权限检测中</span>
+      <span class="module-title">YARA 规则扫描</span>
+    </div>
+  </header>
+  <main>
+    <div class="toolbar">
+      <nav class="top-nav" aria-label="主要功能">
+        <a class="nav-link" href="/">进程信息</a>
+        <a class="nav-link" href="/host.html">主机信息</a>
+        <a class="nav-link" href="/findings.html">关注项</a>
+        <a class="nav-link" href="/threat.html">威胁分析</a>
+        <a class="nav-link" href="/filetrace.html">文件痕迹</a>
+        <a class="nav-link" href="/history.html">历史通信</a>
+        <a class="nav-link" href="/security.html">事件日志</a>
+        <a class="nav-link" href="/health.html">日志健康</a>
+        <a class="nav-link" aria-current="page" href="/yara.html">YARA扫描</a>
+        <a class="nav-link" href="/ai.html">AI分析</a>
+      </nav>
+      <span class="current-module">当前：YARA扫描</span>
+      <input id="engine-path" placeholder="YARA 引擎路径，留空自动检测">
+      <button id="detect-engine" class="secondary">检测引擎</button>
+      <span id="status" class="status">尚未加载</span>
+    </div>
+
+    <section class="setup-grid">
+      <section class="panel">
+        <div class="panel-head">
+          <span class="panel-title">规则目录</span>
+          <span id="engine-badge" class="badge warn">检测中</span>
+        </div>
+        <div class="panel-body rules-body">
+          <div id="engine-info" class="message">正在检测本机 YARA 引擎...</div>
+          <div class="field">
+            <label for="rule-dir">规则文件夹</label>
+            <div class="inline-row">
+              <input id="rule-dir" placeholder="选择包含 .yar/.yara/.rule/.rules 的文件夹">
+              <button id="pick-rule-dir" class="secondary">选择文件夹</button>
+            </div>
+          </div>
+          <div class="actions">
+            <button id="check-rules">检测规则</button>
+            <button id="clear-rules" class="secondary">清空</button>
+            <span id="rule-summary" class="badge info">尚未检测</span>
+          </div>
+          <div id="rule-table" class="table-wrap">
+            <div class="empty">选择规则文件夹后，这里会显示每个规则文件的检测状态和错误信息。</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <span class="panel-title">文件扫描</span>
+          <span id="file-target-summary" class="badge info">未选择文件夹</span>
+        </div>
+        <div class="panel-body file-body">
+          <div class="field">
+            <label for="scan-folders">扫描文件夹</label>
+            <div class="inline-row">
+              <input id="folder-input" placeholder="选择后会追加到下方列表">
+              <button id="pick-scan-folder" class="secondary">选择文件夹</button>
+            </div>
+            <textarea id="scan-folders" placeholder="每行一个扫描文件夹"></textarea>
+            <div id="selected-folder-note" class="selected-note">未选择扫描文件夹</div>
+          </div>
+          <div class="field">
+            <label for="file-paths">补充文件路径</label>
+            <textarea id="file-paths" placeholder="每行一个文件路径，可选"></textarea>
+          </div>
+          <div class="check-row">
+            <label><input id="recursive" type="checkbox" checked> 包含子目录</label>
+            <label><input id="include-process-files" type="checkbox"> 同时扫描当前进程文件</label>
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label for="timeout-seconds">单目标超时</label>
+              <input id="timeout-seconds" type="number" min="1" max="300" value="8">
+            </div>
+            <div class="field">
+              <label for="concurrency">并发数</label>
+              <input id="concurrency" type="number" min="1" max="6" value="4">
+            </div>
+            <div class="field">
+              <label for="max-files">文件上限</label>
+              <input id="max-files" type="number" min="1" max="50000" value="5000">
+            </div>
+          </div>
+          <div class="actions">
+            <button id="scan-files">开始文件扫描</button>
+            <button id="stop-scan-files" class="secondary" disabled>停止扫描</button>
+            <button id="clear-file-targets" class="secondary">清空文件目标</button>
+          </div>
+        </div>
+      </section>
+    </section>
+
+    <section class="panel process-panel">
+      <div class="panel-head">
+        <span class="panel-title">进程内存扫描</span>
+        <span id="process-summary" class="badge info">等待加载</span>
+      </div>
+      <div class="panel-body process-body">
+        <div class="metric-row">
+          <label><input id="include-process-memory" type="checkbox" checked> 扫描已勾选进程内存</label>
+          <span id="process-scan-note" class="badge warn">全选进程时耗时会较长，扫描时会分批返回进度。</span>
+        </div>
+        <div class="actions">
+          <button id="refresh-processes" class="secondary">刷新进程</button>
+          <button id="select-all-processes" class="secondary">全选进程</button>
+          <button id="select-visible-processes" class="secondary">选择当前过滤结果</button>
+          <button id="clear-processes" class="secondary">清空勾选</button>
+          <button id="scan-processes" class="warn">开始进程内存扫描</button>
+          <button id="stop-scan-processes" class="secondary" disabled>停止扫描</button>
+        </div>
+        <input id="process-filter" placeholder="按 PID、进程名、路径过滤">
+        <div id="process-table" class="table-wrap">
+          <div class="empty">正在加载进程列表...</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel results">
+      <div id="summary" class="summary">尚未扫描</div>
+      <div id="table" class="table-wrap">
+        <div class="empty">扫描结果会显示规则文件、命中规则、进程 PID、进程名、路径、耗时和错误信息。</div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const enginePath = document.getElementById('engine-path');
+    const detectEngine = document.getElementById('detect-engine');
+    const engineBadge = document.getElementById('engine-badge');
+    const engineInfo = document.getElementById('engine-info');
+    const ruleDir = document.getElementById('rule-dir');
+    const pickRuleDir = document.getElementById('pick-rule-dir');
+    const checkRulesBtn = document.getElementById('check-rules');
+    const clearRulesBtn = document.getElementById('clear-rules');
+    const ruleSummary = document.getElementById('rule-summary');
+    const ruleTable = document.getElementById('rule-table');
+    const folderInput = document.getElementById('folder-input');
+    const pickScanFolder = document.getElementById('pick-scan-folder');
+    const scanFolders = document.getElementById('scan-folders');
+    const selectedFolderNote = document.getElementById('selected-folder-note');
+    const fileTargetSummary = document.getElementById('file-target-summary');
+    const filePaths = document.getElementById('file-paths');
+    const recursive = document.getElementById('recursive');
+    const includeProcessFiles = document.getElementById('include-process-files');
+    const timeoutSeconds = document.getElementById('timeout-seconds');
+    const concurrency = document.getElementById('concurrency');
+    const maxFiles = document.getElementById('max-files');
+    const scanFilesBtn = document.getElementById('scan-files');
+    const stopScanFilesBtn = document.getElementById('stop-scan-files');
+    const clearFileTargets = document.getElementById('clear-file-targets');
+    const includeProcessMemory = document.getElementById('include-process-memory');
+    const refreshProcesses = document.getElementById('refresh-processes');
+    const selectAllProcesses = document.getElementById('select-all-processes');
+    const selectVisibleProcesses = document.getElementById('select-visible-processes');
+    const clearProcesses = document.getElementById('clear-processes');
+    const scanProcessesBtn = document.getElementById('scan-processes');
+    const stopScanProcessesBtn = document.getElementById('stop-scan-processes');
+    const processFilter = document.getElementById('process-filter');
+    const processSummary = document.getElementById('process-summary');
+    const processScanNote = document.getElementById('process-scan-note');
+    const processTable = document.getElementById('process-table');
+    const statusEl = document.getElementById('status');
+    const summaryEl = document.getElementById('summary');
+    const table = document.getElementById('table');
+
+    let processes = [];
+    let selectedPids = new Set();
+    let ruleFiles = [];
+    let latestResults = [];
+    let fileScanController = null;
+    let processScanController = null;
+    let processScanStopped = false;
+
+    function escapeHTML(value) {
+      return String(value ?? '').replace(/[&<>"']/g, ch => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[ch]));
+    }
+
+    async function loadJSON(url, options) {
+      const res = await fetch(url, options);
+      if (!res.ok) throw new Error(await res.text() || res.statusText);
+      return res.json();
+    }
+
+    function setBusy(value) {
+      detectEngine.disabled = value;
+      checkRulesBtn.disabled = value;
+      scanFilesBtn.disabled = value;
+      scanProcessesBtn.disabled = value;
+      pickRuleDir.disabled = value;
+      pickScanFolder.disabled = value;
+    }
+
+    function setMessage(node, lines, kind) {
+      node.classList.remove('bad', 'ok');
+      if (kind) node.classList.add(kind);
+      const values = Array.isArray(lines) ? lines : [lines];
+      node.innerHTML = values.filter(Boolean).map(line => `<div>${escapeHTML(line)}</div>`).join('') || '<div>-</div>';
+    }
+
+    function splitLines(value) {
+      return value.split(/\r?\n/).map(v => v.trim()).filter(Boolean);
+    }
+
+    function numericValue(node, fallback) {
+      const value = Number(node.value);
+      return Number.isFinite(value) && value > 0 ? value : fallback;
+    }
+
+    function appendLine(textarea, value) {
+      value = value.trim();
+      if (!value) return;
+      const lines = splitLines(textarea.value);
+      if (!lines.some(line => line.toLowerCase() === value.toLowerCase())) lines.push(value);
+      textarea.value = lines.join('\n');
+      updateFileTargetSummary();
+    }
+
+    function updateFileTargetSummary() {
+      const folders = splitLines(scanFolders.value);
+      const files = splitLines(filePaths.value);
+      const parts = [];
+      if (folders.length) parts.push(`文件夹 ${folders.length}`);
+      if (files.length) parts.push(`文件 ${files.length}`);
+      if (includeProcessFiles.checked) parts.push('当前进程文件');
+      fileTargetSummary.textContent = parts.length ? parts.join(' / ') : '未选择文件夹';
+      selectedFolderNote.textContent = folders.length ? `已选择：${folders.join('；')}` : '未选择扫描文件夹';
+    }
+
+    async function chooseFolder(title) {
+      const params = new URLSearchParams({ title });
+      const data = await loadJSON(`/api/dialog/folder?${params}`);
+      if (data.error) throw new Error(data.error);
+      return data.ok ? data.path : '';
+    }
+
+    async function refreshEngine() {
+      statusEl.textContent = '正在检测 YARA 引擎...';
+      try {
+        const params = new URLSearchParams();
+        if (enginePath.value.trim()) params.set('enginePath', enginePath.value.trim());
+        const data = await loadJSON(`/api/yara/status?${params}`);
+        engineBadge.className = data.found ? 'badge ok' : 'badge bad';
+        engineBadge.textContent = data.found ? '引擎可用' : '未检测到引擎';
+        setMessage(engineInfo, data.found ? [
+          `路径：${data.path || '-'}`,
+          `版本：${data.version || '-'}`
+        ] : [data.error || '未检测到 YARA 引擎'], data.found ? 'ok' : 'bad');
+        statusEl.textContent = data.found ? 'YARA 引擎可用' : 'YARA 引擎不可用';
+      } catch (err) {
+        engineBadge.className = 'badge bad';
+        engineBadge.textContent = '检测失败';
+        setMessage(engineInfo, err.message, 'bad');
+        statusEl.textContent = '检测失败';
+      }
+    }
+
+    function renderRuleFiles(files) {
+      ruleFiles = files || [];
+      if (!ruleFiles.length) {
+        ruleTable.innerHTML = '<div class="empty">未发现规则文件</div>';
+        return;
+      }
+      const rows = ruleFiles.map(item => {
+        const status = item.valid
+          ? '<span class="badge ok">可用</span>'
+          : '<span class="badge bad">错误</span>';
+        const output = item.valid ? (item.output || '-') : ((item.errors || []).join('；') || item.output || '-');
+        return `<tr class="${item.valid ? '' : 'error'}">
+          <td class="result">${status}</td>
+          <td class="rule-file" title="${escapeHTML(item.path)}">${escapeHTML(item.name || item.path)}</td>
+          <td class="duration">${escapeHTML(item.durationMs || 0)} ms</td>
+          <td class="output" title="${escapeHTML(output)}">${escapeHTML(output)}</td>
+        </tr>`;
+      }).join('');
+      ruleTable.innerHTML = `<table class="rules-table">
+        <thead>
+          <tr>
+            <th class="result">状态</th>
+            <th class="rule-file">规则文件</th>
+            <th class="duration">耗时</th>
+            <th class="output">错误/输出</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+    }
+
+    async function checkRules() {
+      statusEl.textContent = '正在检测规则目录...';
+      setBusy(true);
+      try {
+        const data = await loadJSON('/api/yara/rules', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            enginePath: enginePath.value.trim(),
+            ruleDir: ruleDir.value.trim(),
+            timeoutSeconds: numericValue(timeoutSeconds, 8)
+          })
+        });
+        renderRuleFiles(data.files || []);
+        ruleSummary.className = (data.errors && data.errors.length) || data.invalidFiles ? 'badge bad' : 'badge ok';
+        ruleSummary.textContent = `规则 ${(data.files || []).length} / 可用 ${data.validFiles || 0} / 错误 ${data.invalidFiles || 0}`;
+        statusEl.textContent = data.validFiles ? '规则目录检测完成' : '没有可用规则';
+      } catch (err) {
+        ruleSummary.className = 'badge bad';
+        ruleSummary.textContent = '检测失败';
+        renderRuleFiles([]);
+        ruleTable.innerHTML = `<div class="empty">${escapeHTML(err.message)}</div>`;
+        statusEl.textContent = '规则目录检测失败';
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    function processMatches(item) {
+      const q = processFilter.value.trim().toLowerCase();
+      if (!q) return true;
+      return [item.pid, item.name, item.path, item.parentName]
+        .some(value => String(value || '').toLowerCase().includes(q));
+    }
+
+    function visibleProcesses() {
+      return processes.filter(processMatches);
+    }
+
+    function renderProcesses() {
+      const visible = visibleProcesses();
+      processSummary.textContent = `已选 ${selectedPids.size} / ${processes.length}`;
+      if (!visible.length) {
+        processTable.innerHTML = '<div class="empty">没有匹配的进程</div>';
+        return;
+      }
+      const rows = visible.map(item => {
+        const checked = selectedPids.has(item.pid) ? 'checked' : '';
+        return `<tr>
+          <td class="select-col"><input type="checkbox" data-pid="${item.pid}" ${checked}></td>
+          <td class="pid">${escapeHTML(item.pid)}</td>
+          <td class="name" title="${escapeHTML(item.name)}">${escapeHTML(item.name || '-')}</td>
+          <td class="path" title="${escapeHTML(item.path)}">${escapeHTML(item.path || item.pathError || '-')}</td>
+        </tr>`;
+      }).join('');
+      processTable.innerHTML = `<table class="process-table">
+        <thead>
+          <tr>
+            <th class="select-col"></th>
+            <th class="pid">PID</th>
+            <th class="name">进程名</th>
+            <th class="path">路径</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+      processTable.querySelectorAll('input[type="checkbox"][data-pid]').forEach(node => {
+        node.addEventListener('change', () => {
+          const pid = Number(node.dataset.pid);
+          if (node.checked) selectedPids.add(pid);
+          else selectedPids.delete(pid);
+          processSummary.textContent = `已选 ${selectedPids.size} / ${processes.length}`;
+        });
+      });
+    }
+
+    async function loadProcesses() {
+      processSummary.textContent = '加载中';
+      try {
+        const data = await loadJSON('/api/yara/processes');
+        processes = data.items || [];
+        selectedPids = new Set(processes.map(item => item.pid));
+        renderProcesses();
+        statusEl.textContent = '进程列表已加载';
+      } catch (err) {
+        processes = [];
+        selectedPids = new Set();
+        processTable.innerHTML = `<div class="empty">${escapeHTML(err.message)}</div>`;
+        processSummary.textContent = '加载失败';
+      }
+    }
+
+    function resetResults(message) {
+      latestResults = [];
+      summaryEl.textContent = message || '正在扫描...';
+      table.innerHTML = `<div class="empty">${escapeHTML(message || '正在扫描，请等待结果返回。')}</div>`;
+    }
+
+    function mergeResults(data, append) {
+      if (!append) latestResults = [];
+      latestResults = latestResults.concat(data.results || []);
+      if (data.ruleFiles) renderRuleFiles(data.ruleFiles);
+      renderResults({
+        startedAt: data.startedAt,
+        finishedAt: data.finishedAt,
+        results: latestResults,
+        errors: data.errors || [],
+        ruleErrors: data.ruleErrors || []
+      });
+    }
+
+    function renderResults(data) {
+      const results = data.results || [];
+      const matched = results.filter(item => item.matched).length;
+      const errors = results.filter(item => item.error).length;
+      const timedOut = results.filter(item => item.timedOut).length;
+      summaryEl.innerHTML = [
+        `<span class="badge info">结果 ${results.length}</span>`,
+        `<span class="badge warn">命中 ${matched}</span>`,
+        `<span class="badge bad">错误 ${errors}</span>`,
+        `<span class="badge warn">超时 ${timedOut}</span>`,
+        `<span>${escapeHTML(data.startedAt || '')} - ${escapeHTML(data.finishedAt || '')}</span>`
+      ].join('');
+
+      if (data.ruleErrors && data.ruleErrors.length) {
+        statusEl.textContent = data.ruleErrors.join('；');
+      } else if (data.errors && data.errors.length) {
+        statusEl.textContent = data.errors.join('；');
+      }
+
+      if (!results.length) {
+        table.innerHTML = '<div class="empty">没有扫描结果</div>';
+        return;
+      }
+
+      const rows = results.map(item => {
+        const classes = [item.matched ? 'hit' : '', item.error ? 'error' : ''].filter(Boolean).join(' ');
+        const type = item.targetType === 'process-memory' ? '进程内存' : '文件';
+        const ruleList = item.matched ? ((item.rules || []).join(', ') || '命中规则未解析') : ((item.error || item.timedOut) ? '-' : '未命中所有规则');
+        const resultBadge = item.error
+          ? '<span class="badge bad">错误</span>'
+          : (item.timedOut ? '<span class="badge warn">超时</span>' : (item.matched ? '<span class="badge warn">命中</span>' : '<span class="badge ok">未命中</span>'));
+        const relatedPids = (item.relatedPids || []).join(', ');
+        const pid = item.pid ? String(item.pid) : (relatedPids || '-');
+        const processName = item.processName || (item.relatedProcesses || []).join(', ') || '-';
+        const path = item.path || item.target || '-';
+        const output = item.error || item.output || '-';
+        return `<tr class="${classes}">
+          <td class="rule-file" title="${escapeHTML(item.ruleFile || '-')}">${escapeHTML(item.ruleFile || '-')}</td>
+          <td class="result">${resultBadge}</td>
+          <td class="result">${escapeHTML(type)}</td>
+          <td class="rules" title="${escapeHTML(ruleList)}">${escapeHTML(ruleList)}</td>
+          <td class="pid" title="${escapeHTML(pid)}">${escapeHTML(pid)}</td>
+          <td class="process" title="${escapeHTML(processName)}">${escapeHTML(processName)}</td>
+          <td class="path" title="${escapeHTML(path)}">${escapeHTML(path)}</td>
+          <td class="duration">${escapeHTML(item.durationMs)} ms</td>
+          <td class="output" title="${escapeHTML(output)}">${escapeHTML(output)}</td>
+        </tr>`;
+      }).join('');
+      table.innerHTML = `<table class="result-table">
+        <thead>
+          <tr>
+            <th class="rule-file">规则文件</th>
+            <th class="result">结果</th>
+            <th class="result">类型</th>
+            <th class="rules">命中规则</th>
+            <th class="pid">PID</th>
+            <th class="process">进程</th>
+            <th class="path">路径/目标</th>
+            <th class="duration">耗时</th>
+            <th class="output">输出/错误</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+    }
+
+    function scanPayloadBase() {
+      return {
+        enginePath: enginePath.value.trim(),
+        ruleDir: ruleDir.value.trim(),
+        timeoutSeconds: numericValue(timeoutSeconds, 8),
+        concurrency: numericValue(concurrency, 4),
+        maxFiles: numericValue(maxFiles, 5000)
+      };
+    }
+
+    async function runScan(payload, signal) {
+      return loadJSON('/api/yara/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal
+      });
+    }
+
+    async function scanFiles() {
+      const folders = splitLines(scanFolders.value);
+      const files = splitLines(filePaths.value);
+      if (!folders.length && !files.length && !includeProcessFiles.checked) {
+        statusEl.textContent = '请先选择扫描文件夹或填写文件路径';
+        return;
+      }
+      resetResults('正在扫描文件目标...');
+      statusEl.textContent = '正在扫描文件目标...';
+      fileScanController = new AbortController();
+      stopScanFilesBtn.disabled = false;
+      setBusy(true);
+      try {
+        const data = await runScan({
+          ...scanPayloadBase(),
+          paths: files,
+          folderPaths: folders,
+          includeProcessFiles: includeProcessFiles.checked,
+          includeProcessMemory: false,
+          recursive: recursive.checked
+        }, fileScanController.signal);
+        mergeResults(data, false);
+        statusEl.textContent = data.valid ? '文件扫描完成' : '没有可用规则，未执行扫描';
+      } catch (err) {
+        if (err.name === 'AbortError') {
+          summaryEl.textContent = '文件扫描已停止';
+          statusEl.textContent = '文件扫描已停止';
+        } else {
+          table.innerHTML = `<div class="empty">${escapeHTML(err.message)}</div>`;
+          summaryEl.textContent = '文件扫描失败';
+          statusEl.textContent = '文件扫描失败';
+        }
+      } finally {
+        fileScanController = null;
+        stopScanFilesBtn.disabled = true;
+        setBusy(false);
+      }
+    }
+
+    function processBatches(values, size) {
+      const out = [];
+      for (let i = 0; i < values.length; i += size) out.push(values.slice(i, i + size));
+      return out;
+    }
+
+    async function scanProcesses() {
+      const selected = Array.from(selectedPids);
+      if (!includeProcessMemory.checked || !selected.length) {
+        statusEl.textContent = '请先勾选要扫描的进程';
+        return;
+      }
+      const batchSize = 12;
+      const batches = processBatches(selected, batchSize);
+      processScanController = new AbortController();
+      processScanStopped = false;
+      stopScanProcessesBtn.disabled = false;
+      resetResults(`正在分批扫描进程内存：0 / ${selected.length}`);
+      processScanNote.textContent = `正在扫描：0 / ${selected.length}`;
+      statusEl.textContent = `正在扫描进程内存，共 ${selected.length} 个 PID`;
+      setBusy(true);
+      try {
+        latestResults = [];
+        let done = 0;
+        for (let i = 0; i < batches.length; i++) {
+          if (processScanStopped) break;
+          const batch = batches[i];
+          processScanNote.textContent = `正在扫描批次 ${i + 1} / ${batches.length}，PID ${done + 1}-${done + batch.length}`;
+          statusEl.textContent = `进程内存扫描中：${done} / ${selected.length}`;
+          const data = await runScan({
+            ...scanPayloadBase(),
+            pids: batch,
+            includeProcessMemory: true,
+            includeProcessFiles: false,
+            recursive: false
+          }, processScanController.signal);
+          done += batch.length;
+          mergeResults(data, true);
+          summaryEl.insertAdjacentHTML('beforeend', ` <span class="badge info">进度 ${done} / ${selected.length}</span>`);
+          if (!data.valid) break;
+        }
+        if (processScanStopped) {
+          processScanNote.textContent = `进程内存扫描已停止：${Math.min(done, selected.length)} / ${selected.length}`;
+          statusEl.textContent = '进程内存扫描已停止';
+        } else {
+          processScanNote.textContent = `进程内存扫描完成：${Math.min(done, selected.length)} / ${selected.length}`;
+          statusEl.textContent = '进程内存扫描完成';
+        }
+      } catch (err) {
+        if (err.name === 'AbortError') {
+          processScanStopped = true;
+          summaryEl.textContent = '进程内存扫描已停止';
+          statusEl.textContent = '进程内存扫描已停止';
+        } else {
+          table.innerHTML = `<div class="empty">${escapeHTML(err.message)}</div>`;
+          summaryEl.textContent = '进程内存扫描失败';
+          statusEl.textContent = '进程内存扫描失败';
+        }
+      } finally {
+        processScanController = null;
+        stopScanProcessesBtn.disabled = true;
+        setBusy(false);
+      }
+    }
+
+    detectEngine.addEventListener('click', refreshEngine);
+    pickRuleDir.addEventListener('click', async () => {
+      try {
+        const path = await chooseFolder('选择 YARA 规则文件夹');
+        if (path) {
+          ruleDir.value = path;
+          await checkRules();
+        }
+      } catch (err) {
+        ruleSummary.className = 'badge bad';
+        ruleSummary.textContent = err.message;
+      }
+    });
+    pickScanFolder.addEventListener('click', async () => {
+      try {
+        const path = await chooseFolder('选择要扫描的文件夹');
+        if (path) {
+          folderInput.value = path;
+          appendLine(scanFolders, path);
+          statusEl.textContent = '已选择扫描文件夹';
+        }
+      } catch (err) {
+        statusEl.textContent = err.message;
+      }
+    });
+    checkRulesBtn.addEventListener('click', checkRules);
+    clearRulesBtn.addEventListener('click', () => {
+      ruleDir.value = '';
+      ruleFiles = [];
+      ruleSummary.className = 'badge info';
+      ruleSummary.textContent = '尚未检测';
+      ruleTable.innerHTML = '<div class="empty">选择规则文件夹后，这里会显示每个规则文件的检测状态和错误信息。</div>';
+    });
+    scanFolders.addEventListener('input', updateFileTargetSummary);
+    filePaths.addEventListener('input', updateFileTargetSummary);
+    includeProcessFiles.addEventListener('change', updateFileTargetSummary);
+    clearFileTargets.addEventListener('click', () => {
+      folderInput.value = '';
+      scanFolders.value = '';
+      filePaths.value = '';
+      includeProcessFiles.checked = false;
+      updateFileTargetSummary();
+      statusEl.textContent = '文件扫描目标已清空';
+    });
+    refreshProcesses.addEventListener('click', loadProcesses);
+    selectAllProcesses.addEventListener('click', () => {
+      selectedPids = new Set(processes.map(item => item.pid));
+      renderProcesses();
+    });
+    selectVisibleProcesses.addEventListener('click', () => {
+      selectedPids = new Set(visibleProcesses().map(item => item.pid));
+      renderProcesses();
+    });
+    clearProcesses.addEventListener('click', () => {
+      selectedPids = new Set();
+      renderProcesses();
+    });
+    processFilter.addEventListener('input', renderProcesses);
+    scanFilesBtn.addEventListener('click', scanFiles);
+    stopScanFilesBtn.addEventListener('click', () => {
+      if (fileScanController) {
+        fileScanController.abort();
+        statusEl.textContent = '正在停止文件扫描...';
+      }
+    });
+    scanProcessesBtn.addEventListener('click', scanProcesses);
+    stopScanProcessesBtn.addEventListener('click', () => {
+      processScanStopped = true;
+      if (processScanController) processScanController.abort();
+      statusEl.textContent = '正在停止进程内存扫描...';
+    });
+
+    refreshEngine();
+    loadProcesses();
+    updateFileTargetSummary();
+  </script>
+</body>
+</html>

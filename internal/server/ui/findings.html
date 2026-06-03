@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WinTraceLens - 关注项</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --panel: #ffffff;
+      --line: #d9e0ea;
+      --line-soft: #edf1f6;
+      --text: #182235;
+      --muted: #5b6678;
+      --head: #243447;
+      --head-2: #edf3f8;
+      --accent: #1769aa;
+      --accent-dark: #0f4e82;
+      --ok: #176b43;
+      --warn: #9a5200;
+      --bad: #a41220;
+      --info: #2b5b91;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+      font-size: 14px;
+      letter-spacing: 0;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 13px 18px;
+      background: var(--head);
+      color: #fff;
+    }
+    h1 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 650;
+      letter-spacing: 0;
+    }
+    main {
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr);
+      gap: 10px;
+      height: calc(100vh - 48px);
+      padding: 12px;
+    }
+    .toolbar, .summary {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    input {
+      width: min(620px, 100%);
+      height: 34px;
+      padding: 6px 10px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: #fff;
+      color: var(--text);
+      font: inherit;
+    }
+    button, a.button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: 34px;
+      padding: 0 12px;
+      border: 1px solid var(--accent-dark);
+      border-radius: 4px;
+      background: var(--accent);
+      color: #fff;
+      cursor: pointer;
+      font: inherit;
+      text-decoration: none;
+    }
+    button.secondary, a.button.secondary {
+      border-color: var(--line);
+      background: #fff;
+      color: var(--text);
+    }
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.45;
+    }
+    .status {
+      margin-left: auto;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .summary {
+      min-height: 34px;
+      color: var(--muted);
+    }
+    .count {
+      display: inline-flex;
+      align-items: center;
+      height: 26px;
+      padding: 0 9px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fff;
+      color: var(--text);
+    }
+    .count.high { border-color: #edb4bd; background: #fff0f2; color: var(--bad); }
+    .count.medium { border-color: #f0ce9f; background: #fff7e8; color: var(--warn); }
+    .count.low { border-color: #c7d7ee; background: #eef5fd; color: var(--info); }
+    .panel {
+      min-height: 0;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel);
+      overflow: hidden;
+    }
+    .table-wrap {
+      height: 100%;
+      overflow: auto;
+    }
+    table {
+      width: 100%;
+      min-width: 1760px;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+    th, td {
+      border-bottom: 1px solid var(--line-soft);
+      padding: 7px 8px;
+      text-align: left;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: var(--head-2);
+      color: #26384f;
+      font-weight: 650;
+    }
+    tbody tr:hover td { background: #f3f8ff; }
+    .level { width: 78px; }
+    .source { width: 100px; }
+    .name { width: 220px; }
+    .reason { width: 250px; }
+    .md5 {
+      width: 270px;
+      font-family: Consolas, "Courier New", monospace;
+    }
+    .signature { width: 150px; }
+    .path { width: 390px; }
+    .command { width: 390px; }
+    .extra { width: 360px; }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      max-width: 100%;
+      height: 24px;
+      padding: 0 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #f8fafc;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      vertical-align: middle;
+    }
+    .pill.high, .pill.bad {
+      border-color: #edb4bd;
+      background: #fff0f2;
+      color: var(--bad);
+    }
+    .pill.medium, .pill.unsigned {
+      border-color: #f0ce9f;
+      background: #fff7e8;
+      color: var(--warn);
+    }
+    .pill.low, .pill.signed {
+      border-color: #c7d7ee;
+      background: #eef5fd;
+      color: var(--info);
+    }
+    .pill.system {
+      border-color: #b8d7c8;
+      background: #edf8f2;
+      color: var(--ok);
+    }
+    .empty {
+      padding: 18px;
+      color: var(--muted);
+    }
+    .bad-text { color: var(--bad); }
+  </style>
+  <link rel="stylesheet" href="/nav.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header>
+    <h1>WinTraceLens</h1>
+    <div class="app-meta">
+      <span class="release-badge" data-app-version>1.0 基础版</span>
+      <span class="permission-badge unknown" data-admin-status>权限检测中</span>
+      <span class="module-title">进程与持久化关注项汇总</span>
+    </div>
+  </header>
+  <main>
+    <div class="toolbar">
+      <nav class="top-nav" aria-label="主要功能">
+        <a class="nav-link" href="/">进程信息</a>
+        <a class="nav-link" href="/host.html">主机信息</a>
+        <a class="nav-link" aria-current="page" href="/findings.html">关注项</a>
+        <a class="nav-link" href="/threat.html">威胁分析</a>
+        <a class="nav-link" href="/filetrace.html">文件痕迹</a>
+        <a class="nav-link" href="/history.html">历史通信</a>
+        <a class="nav-link" href="/security.html">事件日志</a>
+        <a class="nav-link" href="/health.html">日志健康</a>
+        <a class="nav-link" href="/yara.html">YARA扫描</a>
+        <a class="nav-link" href="/ai.html">AI分析</a>
+      </nav>
+      <span class="current-module">当前：关注项</span>
+      <button id="refresh">刷新关注项</button>
+      <button id="copy-md5" class="secondary" disabled>复制可见 MD5</button>
+      <button id="export-csv" class="secondary" disabled>导出 CSV</button>
+      <input id="filter" placeholder="按级别、来源、名称、原因、路径、命令、MD5 过滤">
+      <span id="status" class="status">尚未加载</span>
+    </div>
+    <div id="summary" class="summary"></div>
+    <section class="panel">
+      <div id="table" class="table-wrap">
+        <div class="empty">正在加载关注项...</div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const table = document.getElementById('table');
+    const filter = document.getElementById('filter');
+    const statusEl = document.getElementById('status');
+    const summaryEl = document.getElementById('summary');
+    const copyMD5 = document.getElementById('copy-md5');
+    const exportCSV = document.getElementById('export-csv');
+    let findings = [];
+
+    function text(value) {
+      return value == null ? '' : String(value);
+    }
+
+    function escapeCell(value) {
+      return text(value).replace(/[&<>"']/g, ch => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[ch]));
+    }
+
+    function levelClass(value) {
+      if (value === '高') return 'high';
+      if (value === '中') return 'medium';
+      if (value === '低') return 'low';
+      return '';
+    }
+
+    function signatureClass(value) {
+      if (value === '系统文件') return 'system';
+      if (value === '已签名') return 'signed';
+      if (value === '无签名请注意!!!') return 'unsigned';
+      if (value === '签名异常') return 'bad';
+      return '';
+    }
+
+    function renderSignature(value, message) {
+      if (!value) return '';
+      return `<span class="pill ${signatureClass(value)}" title="${escapeCell(message || value)}">${escapeCell(value)}</span>`;
+    }
+
+    function visibleItems() {
+      const q = filter.value.trim().toLowerCase();
+      if (!q) return findings;
+      return findings.filter(item => Object.values(item).some(v => text(v).toLowerCase().includes(q)));
+    }
+
+    function renderSummary(items) {
+      const high = items.filter(x => x.level === '高').length;
+      const medium = items.filter(x => x.level === '中').length;
+      const low = items.filter(x => x.level === '低').length;
+      summaryEl.innerHTML = `
+        <span class="count high">高 ${high}</span>
+        <span class="count medium">中 ${medium}</span>
+        <span class="count low">低 ${low}</span>
+      `;
+    }
+
+    function render() {
+      const items = visibleItems();
+      renderSummary(items);
+      statusEl.textContent = `显示 ${items.length} / ${findings.length}`;
+      if (!items.length) {
+        table.innerHTML = '<div class="empty">没有匹配的关注项</div>';
+        return;
+      }
+      table.innerHTML = `<table><thead><tr>
+        <th class="level">级别</th><th class="source">来源</th><th class="name">名称</th><th class="reason">原因</th>
+        <th class="md5">MD5</th><th class="signature">签名</th><th class="path">路径</th><th class="command">命令</th><th class="extra">补充信息</th>
+      </tr></thead><tbody>${items.map(x => `<tr>
+        <td class="level"><span class="pill ${levelClass(x.level)}">${escapeCell(x.level)}</span></td>
+        <td class="source" title="${escapeCell(x.source)}">${escapeCell(x.source)}</td>
+        <td class="name" title="${escapeCell(x.name)}">${escapeCell(x.name)}</td>
+        <td class="reason" title="${escapeCell(x.reason)}">${escapeCell(x.reason)}</td>
+        <td class="md5" title="${escapeCell(x.md5)}">${escapeCell(x.md5)}</td>
+        <td class="signature">${renderSignature(x.signature, x.signatureMsg)}</td>
+        <td class="path" title="${escapeCell(x.path)}">${escapeCell(x.path)}</td>
+        <td class="command" title="${escapeCell(x.command)}">${escapeCell(x.command)}</td>
+        <td class="extra" title="${escapeCell(x.extra)}">${escapeCell(x.extra)}</td>
+      </tr>`).join('')}</tbody></table>`;
+    }
+
+    async function loadJSON(url, options) {
+      const res = await fetch(url, options || { cache: 'no-store' });
+      if (!res.ok) {
+        const msg = await res.text();
+        throw new Error(msg || res.statusText);
+      }
+      return res.json();
+    }
+
+    async function load() {
+      statusEl.textContent = '正在采集进程、主机信息并分析关注项...';
+      copyMD5.disabled = true;
+      exportCSV.disabled = true;
+      summaryEl.innerHTML = '';
+      table.innerHTML = '<div class="empty">正在采集关注项...</div>';
+      const data = await loadJSON('/api/findings');
+      findings = data.items || [];
+      copyMD5.disabled = false;
+      exportCSV.disabled = false;
+      statusEl.textContent = `生成时间 ${data.generatedAt || ''}，关注项 ${findings.length}`;
+      render();
+    }
+
+    function toCSV(items) {
+      const header = ['级别', '来源', '名称', '原因', 'MD5', '签名', '签名说明', '路径', '命令', '补充信息'];
+      const lines = [header, ...items.map(x => [
+        x.level, x.source, x.name, x.reason, x.md5, x.signature, x.signatureMsg, x.path, x.command, x.extra
+      ])];
+      return lines.map(line => line.map(v => `"${text(v).replace(/"/g, '""')}"`).join(',')).join('\r\n');
+    }
+
+    async function copyText(value, label) {
+      await navigator.clipboard.writeText(value);
+      statusEl.textContent = label;
+    }
+
+    function downloadCSV(url) {
+      const a = document.createElement('a');
+      a.href = url;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }
+
+    function filterQueryString() {
+      const q = filter.value.trim();
+      return q ? `?q=${encodeURIComponent(q)}` : '';
+    }
+
+    document.getElementById('refresh').addEventListener('click', () => {
+      load().catch(err => {
+        table.innerHTML = `<div class="empty bad-text">${escapeCell(err.message)}</div>`;
+        statusEl.textContent = '加载失败';
+      });
+    });
+
+    copyMD5.addEventListener('click', () => {
+      const hashes = visibleItems().map(x => x.md5).filter(Boolean);
+      const unique = [...new Set(hashes)];
+      copyText(unique.join('\n'), `已复制 ${unique.length} 个 MD5`);
+    });
+
+    exportCSV.addEventListener('click', () => {
+      statusEl.textContent = '正在生成 CSV...';
+      downloadCSV(`/api/findings.csv${filterQueryString()}`);
+    });
+
+    filter.addEventListener('input', render);
+
+    load().catch(err => {
+      table.innerHTML = `<div class="empty bad-text">${escapeCell(err.message)}</div>`;
+      statusEl.textContent = '加载失败';
+    });
+  </script>
+</body>
+</html>

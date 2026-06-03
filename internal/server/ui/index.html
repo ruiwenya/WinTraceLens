@@ -1,0 +1,1010 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WinTraceLens</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --panel: #ffffff;
+      --line: #d9e0ea;
+      --line-soft: #edf1f6;
+      --text: #182235;
+      --muted: #5b6678;
+      --head: #243447;
+      --head-2: #edf3f8;
+      --accent: #1769aa;
+      --accent-dark: #0f4e82;
+      --ok: #176b43;
+      --warn: #9a5200;
+      --bad: #a41220;
+      --info: #2b5b91;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+      font-size: 14px;
+      letter-spacing: 0;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 13px 18px;
+      background: var(--head);
+      color: #fff;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 650;
+      letter-spacing: 0;
+    }
+
+    main {
+      display: grid;
+      grid-template-rows: auto minmax(300px, 1fr) 260px;
+      gap: 10px;
+      height: calc(100vh - 48px);
+      padding: 12px;
+    }
+
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    input, select {
+      width: min(560px, 100%);
+      height: 34px;
+      padding: 6px 10px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: #fff;
+      color: var(--text);
+      font: inherit;
+    }
+
+    select {
+      width: 150px;
+      min-width: 150px;
+    }
+
+    button {
+      height: 34px;
+      padding: 0 12px;
+      border: 1px solid var(--accent-dark);
+      border-radius: 4px;
+      background: var(--accent);
+      color: #fff;
+      cursor: pointer;
+      font: inherit;
+    }
+
+    button.secondary {
+      border-color: var(--line);
+      background: #fff;
+      color: var(--text);
+    }
+
+    button.tab {
+      border-color: transparent;
+      background: transparent;
+      color: var(--muted);
+    }
+
+    button.tab.active {
+      border-color: var(--accent);
+      background: #e8f2fb;
+      color: var(--accent-dark);
+    }
+
+    button.mini {
+      height: 26px;
+      padding: 0 8px;
+      font-size: 12px;
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.45;
+    }
+
+    button:hover:not(:disabled) {
+      filter: brightness(0.96);
+    }
+
+    .status {
+      margin-left: auto;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .panel {
+      min-height: 0;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel);
+      overflow: hidden;
+    }
+
+    .table-wrap {
+      height: 100%;
+      overflow: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+
+    .process-table {
+      min-width: 1900px;
+    }
+
+    .detail-table {
+      min-width: 1120px;
+    }
+
+    th,
+    td {
+      border-bottom: 1px solid var(--line-soft);
+      padding: 7px 8px;
+      text-align: left;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: var(--head-2);
+      color: #26384f;
+      font-weight: 650;
+    }
+
+    tbody tr {
+      cursor: default;
+    }
+
+    tbody tr:hover td {
+      background: #f3f8ff;
+    }
+
+    tbody tr.selected td {
+      background: #e7f1fb;
+    }
+
+    .pid {
+      width: 76px;
+    }
+
+    .name {
+      width: 170px;
+    }
+
+    .md5 {
+      width: 270px;
+      font-family: Consolas, "Courier New", monospace;
+    }
+
+    .signature {
+      width: 150px;
+    }
+
+    .connections {
+      width: 82px;
+    }
+
+    .actions {
+      width: 174px;
+    }
+
+    .ppid {
+      width: 88px;
+    }
+
+    .parent {
+      width: 160px;
+    }
+
+    .time {
+      width: 156px;
+    }
+
+    .path {
+      width: 390px;
+    }
+
+    .size {
+      width: 90px;
+    }
+
+    .state {
+      width: 120px;
+    }
+
+    .endpoint {
+      width: 280px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      max-width: 100%;
+      height: 24px;
+      padding: 0 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #f8fafc;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      vertical-align: middle;
+    }
+
+    .pill.system {
+      border-color: #b8d7c8;
+      background: #edf8f2;
+      color: var(--ok);
+    }
+
+    .pill.signed {
+      border-color: #c7d7ee;
+      background: #eef5fd;
+      color: var(--info);
+    }
+
+    .pill.unsigned {
+      border-color: #f0ce9f;
+      background: #fff7e8;
+      color: var(--warn);
+    }
+
+    .pill.bad {
+      border-color: #edb4bd;
+      background: #fff0f2;
+      color: var(--bad);
+    }
+
+    .warn {
+      color: var(--warn);
+    }
+
+    .bad {
+      color: var(--bad);
+    }
+
+    .detail {
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr);
+      height: 100%;
+      min-height: 0;
+    }
+
+    .detail-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      background: #fbfcfe;
+    }
+
+    .detail-title {
+      min-width: 0;
+      flex: 1;
+      font-weight: 650;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .detail-meta {
+      color: var(--muted);
+      font-weight: 400;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 4px;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .detail-overview {
+      display: grid;
+      grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr);
+      gap: 10px;
+      padding: 10px;
+    }
+
+    .detail-block {
+      min-width: 0;
+      border: 1px solid var(--line-soft);
+      border-radius: 4px;
+      background: #fff;
+      overflow: hidden;
+    }
+
+    .detail-block h2 {
+      margin: 0;
+      padding: 8px 10px;
+      background: var(--head-2);
+      color: #26384f;
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .kv {
+      display: grid;
+      grid-template-columns: 108px minmax(0, 1fr);
+    }
+
+    .kv div {
+      min-width: 0;
+      padding: 7px 9px;
+      border-top: 1px solid var(--line-soft);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .kv div:nth-child(odd) {
+      color: var(--muted);
+      background: #fbfcfe;
+    }
+
+    .evidence-summary {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--line-soft);
+      color: var(--muted);
+    }
+
+    .empty {
+      padding: 18px;
+      color: var(--muted);
+    }
+  </style>
+  <link rel="stylesheet" href="/nav.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header>
+    <h1>WinTraceLens</h1>
+    <div class="app-meta">
+      <span class="release-badge" data-app-version>1.0 基础版</span>
+      <span class="permission-badge unknown" data-admin-status>权限检测中</span>
+      <span class="module-title">Windows 进程 MD5 与签名快速查看</span>
+    </div>
+  </header>
+
+  <main>
+    <div class="toolbar">
+      <nav class="top-nav" aria-label="主要功能">
+        <a class="nav-link" aria-current="page" href="/">进程信息</a>
+        <a class="nav-link" href="/host.html">主机信息</a>
+        <a class="nav-link" href="/findings.html">关注项</a>
+        <a class="nav-link" href="/threat.html">威胁分析</a>
+        <a class="nav-link" href="/filetrace.html">文件痕迹</a>
+        <a class="nav-link" href="/history.html">历史通信</a>
+        <a class="nav-link" href="/security.html">事件日志</a>
+        <a class="nav-link" href="/health.html">日志健康</a>
+        <a class="nav-link" href="/yara.html">YARA扫描</a>
+        <a class="nav-link" href="/ai.html">AI分析</a>
+      </nav>
+      <span class="current-module">当前：进程信息</span>
+      <input id="filter" placeholder="按 PID、进程名、父进程、路径、MD5、签名过滤">
+      <select id="connection-sort" title="按连接数排序">
+        <option value="default">默认排序</option>
+        <option value="desc">连接数降序</option>
+        <option value="asc">连接数升序</option>
+      </select>
+      <button id="refresh">刷新</button>
+      <button id="copy-md5" class="secondary">复制全部 MD5</button>
+      <button id="export-csv" class="secondary">导出 CSV</button>
+      <span id="status" class="status">尚未加载</span>
+    </div>
+
+    <section class="panel">
+      <div class="table-wrap">
+        <table class="process-table">
+          <thead>
+            <tr>
+              <th class="pid">PID</th>
+              <th class="name">进程名称</th>
+              <th class="md5">MD5</th>
+              <th class="signature">签名信息</th>
+              <th class="connections">连接</th>
+              <th class="actions">操作</th>
+              <th class="ppid">父 PID</th>
+              <th class="parent">父进程</th>
+              <th class="time">进程创建时间</th>
+              <th class="path">可执行文件路径</th>
+              <th class="time">文件创建时间</th>
+              <th class="time">文件修改时间</th>
+            </tr>
+          </thead>
+          <tbody id="rows">
+            <tr><td class="empty" colspan="12">正在加载进程...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel detail">
+      <div class="detail-head">
+        <div id="detail-title" class="detail-title">未选择进程</div>
+        <button id="detail-copy-md5" class="secondary" disabled>复制 MD5</button>
+        <button id="detail-refresh-connections" class="secondary" disabled>刷新连接</button>
+        <button id="detail-open-path" class="secondary" disabled>打开位置</button>
+      </div>
+      <div class="tabs">
+        <button id="tab-basic" class="tab active">基础信息</button>
+        <button id="tab-modules" class="tab">模块列表</button>
+        <button id="tab-connections" class="tab">网络连接</button>
+        <button id="tab-evidence" class="tab">关联证据</button>
+      </div>
+      <div id="detail-body" class="table-wrap">
+        <div class="empty">未选择进程</div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const rows = document.getElementById('rows');
+    const filter = document.getElementById('filter');
+    const connectionSort = document.getElementById('connection-sort');
+    const statusEl = document.getElementById('status');
+    const detailTitle = document.getElementById('detail-title');
+    const detailBody = document.getElementById('detail-body');
+    const detailCopyMD5 = document.getElementById('detail-copy-md5');
+    const detailRefreshConnections = document.getElementById('detail-refresh-connections');
+    const detailOpenPath = document.getElementById('detail-open-path');
+    const tabBasic = document.getElementById('tab-basic');
+    const tabModules = document.getElementById('tab-modules');
+    const tabConnections = document.getElementById('tab-connections');
+    const tabEvidence = document.getElementById('tab-evidence');
+
+    let processes = [];
+    let selectedPid = null;
+    let selectedModules = [];
+    let selectedConnections = [];
+    let selectedEvidence = null;
+    let moduleError = '';
+    let connectionError = '';
+    let evidenceError = '';
+    let activeTab = 'basic';
+    let loadingConnections = false;
+    let loadingEvidence = false;
+
+    function text(value) {
+      return value == null ? '' : String(value);
+    }
+
+    function escapeCell(value) {
+      return text(value).replace(/[&<>"']/g, ch => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+      }[ch]));
+    }
+
+    function selectedProcess() {
+      return processes.find(p => p.pid === selectedPid) || null;
+    }
+
+    function visibleItems() {
+      const q = filter.value.trim().toLowerCase();
+      let items = processes;
+      if (q) {
+        items = processes.filter(p => [
+        p.pid, p.name, p.parentPid, p.parentName, p.createdAt,
+        p.path, p.fileCreated, p.fileModified, p.md5, p.signature,
+        p.signatureMsg, p.connectionCount, p.hashError, p.pathError
+      ].some(v => text(v).toLowerCase().includes(q)));
+      }
+      if (connectionSort.value === 'desc') {
+        items = [...items].sort((a, b) => Number(b.connectionCount || 0) - Number(a.connectionCount || 0));
+      } else if (connectionSort.value === 'asc') {
+        items = [...items].sort((a, b) => Number(a.connectionCount || 0) - Number(b.connectionCount || 0));
+      }
+      return items;
+    }
+
+    function signatureClass(value) {
+      if (value === '系统文件') return 'system';
+      if (value === '已签名') return 'signed';
+      if (value === '无签名请注意!!!') return 'unsigned';
+      if (value === '签名异常') return 'bad';
+      return '';
+    }
+
+    function renderSignature(value, message) {
+      if (!value) return '';
+      return `<span class="pill ${signatureClass(value)}" title="${escapeCell(message || value)}">${escapeCell(value)}</span>`;
+    }
+
+    function kvRows(items) {
+      return items.map(([name, value]) => `<div>${escapeCell(name)}</div><div title="${escapeCell(value)}">${escapeCell(value || '-')}</div>`).join('');
+    }
+
+    function processLine(p) {
+      if (!p) return '-';
+      return `${p.name || '-'} | PID ${p.pid || '-'} | ${p.path || p.pathError || '-'}`;
+    }
+
+    function renderRows() {
+      const items = visibleItems();
+      if (!items.length) {
+        rows.innerHTML = '<tr><td class="empty" colspan="12">没有匹配的进程</td></tr>';
+        statusEl.textContent = `显示 0 / ${processes.length}`;
+        return;
+      }
+
+      rows.innerHTML = items.map(p => {
+        const hashText = p.md5 || p.hashError || p.pathError || '';
+        const hashClass = p.md5 ? '' : (p.hashError || p.pathError ? 'warn' : '');
+        const copyDisabled = p.md5 ? '' : 'disabled';
+        const openDisabled = p.path ? '' : 'disabled';
+        const selected = p.pid === selectedPid ? ' selected' : '';
+        return `<tr class="${selected}" data-pid="${escapeCell(p.pid)}">
+          <td class="pid" title="${escapeCell(p.pid)}">${escapeCell(p.pid)}</td>
+          <td class="name" title="${escapeCell(p.name)}">${escapeCell(p.name)}</td>
+          <td class="md5 ${hashClass}" title="${escapeCell(hashText)}">${escapeCell(hashText)}</td>
+          <td class="signature" title="${escapeCell(p.signatureMsg || p.signature)}">${renderSignature(p.signature, p.signatureMsg)}</td>
+          <td class="connections" title="${escapeCell(p.connectionCount)}">${escapeCell(p.connectionCount || '')}</td>
+          <td class="actions">
+            <button class="mini" data-action="copy-md5" data-pid="${escapeCell(p.pid)}" ${copyDisabled}>复制</button>
+            <button class="mini secondary" data-action="open-path" data-pid="${escapeCell(p.pid)}" ${openDisabled}>位置</button>
+          </td>
+          <td class="ppid" title="${escapeCell(p.parentPid)}">${escapeCell(p.parentPid)}</td>
+          <td class="parent" title="${escapeCell(p.parentName)}">${escapeCell(p.parentName)}</td>
+          <td class="time" title="${escapeCell(p.createdAt)}">${escapeCell(p.createdAt)}</td>
+          <td class="path" title="${escapeCell(p.path || p.pathError)}">${escapeCell(p.path || p.pathError)}</td>
+          <td class="time" title="${escapeCell(p.fileCreated)}">${escapeCell(p.fileCreated)}</td>
+          <td class="time" title="${escapeCell(p.fileModified)}">${escapeCell(p.fileModified)}</td>
+        </tr>`;
+      }).join('');
+
+      statusEl.textContent = `显示 ${items.length} / ${processes.length}`;
+    }
+
+    function renderDetailShell(loading) {
+      const p = selectedProcess();
+      if (!p) {
+        detailTitle.textContent = '未选择进程';
+        detailCopyMD5.disabled = true;
+        detailRefreshConnections.disabled = true;
+        detailOpenPath.disabled = true;
+        detailBody.innerHTML = '<div class="empty">未选择进程</div>';
+        return;
+      }
+
+      detailTitle.innerHTML = `${escapeCell(p.name)} <span class="detail-meta">PID ${escapeCell(p.pid)} | ${escapeCell(p.path || p.pathError || '')}</span>`;
+      detailCopyMD5.disabled = !p.md5;
+      detailRefreshConnections.disabled = false;
+      detailOpenPath.disabled = !p.path;
+      if (loading) {
+        detailBody.innerHTML = '<div class="empty">正在加载详情...</div>';
+      }
+    }
+
+    async function reloadSelectedConnections() {
+      if (selectedPid == null) return;
+      loadingConnections = true;
+      connectionError = '';
+      if (activeTab === 'connections') {
+        detailBody.innerHTML = '<div class="empty">正在刷新网络连接...</div>';
+      }
+      try {
+        const data = await loadJSON(`/api/process/${selectedPid}/connections`);
+        selectedConnections = data.items || [];
+      } catch (err) {
+        selectedConnections = [];
+        connectionError = err.message;
+      } finally {
+        loadingConnections = false;
+      }
+    }
+
+    async function loadSelectedEvidence(force) {
+      if (selectedPid == null) return;
+      if (selectedEvidence && !force) return;
+      loadingEvidence = true;
+      evidenceError = '';
+      detailBody.innerHTML = '<div class="empty">正在采集关联证据...</div>';
+      try {
+        selectedEvidence = await loadJSON(`/api/process/${selectedPid}/detail?max=120`);
+      } catch (err) {
+        selectedEvidence = null;
+        evidenceError = err.message;
+      } finally {
+        loadingEvidence = false;
+      }
+    }
+
+    function renderBasicDetail() {
+      const p = selectedProcess();
+      if (!p) {
+        detailBody.innerHTML = '<div class="empty">未选择进程</div>';
+        return;
+      }
+      const children = processes.filter(item => item.parentPid === p.pid);
+      detailBody.innerHTML = `<div class="detail-overview">
+        <section class="detail-block">
+          <h2>进程基础信息</h2>
+          <div class="kv">${kvRows([
+            ['PID', p.pid],
+            ['进程名', p.name],
+            ['父 PID', p.parentPid],
+            ['父进程', p.parentName],
+            ['创建时间', p.createdAt],
+            ['MD5', p.md5 || p.hashError],
+            ['签名', p.signature],
+            ['签名说明', p.signatureMsg],
+            ['路径', p.path || p.pathError],
+            ['文件创建', p.fileCreated],
+            ['文件修改', p.fileModified],
+            ['实时连接数', p.connectionCount]
+          ])}</div>
+        </section>
+        <section class="detail-block">
+          <h2>父子进程</h2>
+          <div class="kv">${kvRows([
+            ['父进程', p.parentName ? `${p.parentName} | PID ${p.parentPid}` : '-'],
+            ['子进程数量', children.length],
+            ['子进程', children.map(processLine).join('；') || '-']
+          ])}</div>
+        </section>
+      </div>`;
+    }
+
+    function evidenceTable(title, items, headers, rowFn) {
+      if (!items || !items.length) return `<section class="detail-block"><h2>${escapeCell(title)} 0</h2><div class="empty">没有关联记录</div></section>`;
+      return `<section class="detail-block"><h2>${escapeCell(title)} ${items.length}</h2>
+        <table class="detail-table">
+          <thead><tr>${headers.map(h => `<th>${escapeCell(h)}</th>`).join('')}</tr></thead>
+          <tbody>${items.map(rowFn).join('')}</tbody>
+        </table>
+      </section>`;
+    }
+
+    function renderEvidenceDetail() {
+      if (evidenceError) {
+        detailBody.innerHTML = `<div class="empty bad">${escapeCell(evidenceError)}</div>`;
+        return;
+      }
+      if (loadingEvidence) {
+        detailBody.innerHTML = '<div class="empty">正在采集关联证据...</div>';
+        return;
+      }
+      if (!selectedEvidence) {
+        detailBody.innerHTML = '<div class="empty">点击“关联证据”后会采集服务、计划任务、历史通信和事件日志线索。</div>';
+        return;
+      }
+      const errors = selectedEvidence.collectionErrors || [];
+      const blocks = [
+        evidenceTable('相关服务', selectedEvidence.services || [], ['服务名', '状态', '启动', '账户', '路径'], x => `<tr>
+          <td title="${escapeCell(x.name)}">${escapeCell(x.name)}</td><td>${escapeCell(x.state)}</td><td>${escapeCell(x.startMode)}</td><td title="${escapeCell(x.account)}">${escapeCell(x.account)}</td><td title="${escapeCell(x.path || x.command)}">${escapeCell(x.path || x.command)}</td>
+        </tr>`),
+        evidenceTable('相关计划任务', selectedEvidence.scheduledTasks || [], ['任务', '状态', '作者', '可执行路径', '参数'], x => `<tr>
+          <td title="${escapeCell(x.path || x.name)}">${escapeCell(x.path || x.name)}</td><td>${escapeCell(x.state || x.status)}</td><td title="${escapeCell(x.author)}">${escapeCell(x.author)}</td><td title="${escapeCell(x.executable)}">${escapeCell(x.executable)}</td><td title="${escapeCell(x.arguments)}">${escapeCell(x.arguments)}</td>
+        </tr>`),
+        evidenceTable('启动项', selectedEvidence.startupItems || [], ['来源', '名称', '路径', '位置'], x => `<tr>
+          <td>${escapeCell(x.source)}</td><td title="${escapeCell(x.name)}">${escapeCell(x.name)}</td><td title="${escapeCell(x.path || x.command)}">${escapeCell(x.path || x.command)}</td><td title="${escapeCell(x.location)}">${escapeCell(x.location)}</td>
+        </tr>`),
+        evidenceTable('IFEO 劫持', selectedEvidence.imageHijacks || [], ['目标镜像', 'Debugger', '路径'], x => `<tr>
+          <td title="${escapeCell(x.image)}">${escapeCell(x.image)}</td><td title="${escapeCell(x.debugger)}">${escapeCell(x.debugger)}</td><td title="${escapeCell(x.path)}">${escapeCell(x.path)}</td>
+        </tr>`),
+        evidenceTable('历史通信记录', selectedEvidence.historyRecords || [], ['时间', '来源', '事件ID', '进程/PID', '远程/DNS', '动作', '详情'], x => `<tr>
+          <td title="${escapeCell(x.time)}">${escapeCell(x.time)}</td><td>${escapeCell(x.source)}</td><td>${escapeCell(x.eventId)}</td><td title="${escapeCell((x.process || '-') + ' / ' + (x.pid || '-'))}">${escapeCell((x.process || '-') + ' / ' + (x.pid || '-'))}</td><td title="${escapeCell(x.remote || x.query)}">${escapeCell(x.remote || x.query)}</td><td>${escapeCell(x.action)}</td><td title="${escapeCell(x.details)}">${escapeCell(x.details)}</td>
+        </tr>`),
+        evidenceTable('事件日志', selectedEvidence.securityEvents || [], ['时间', '分类', '事件ID', '动作', '账户', '进程/命令'], x => `<tr>
+          <td title="${escapeCell(x.time)}">${escapeCell(x.time)}</td><td>${escapeCell(x.category)}</td><td>${escapeCell(x.eventId)}</td><td title="${escapeCell(x.action)}">${escapeCell(x.action)}</td><td title="${escapeCell(x.account)}">${escapeCell(x.account)}</td><td title="${escapeCell(x.process || x.command)}">${escapeCell(x.process || x.command)}</td>
+        </tr>`)
+      ];
+      detailBody.innerHTML = `<div class="evidence-summary">
+        <span>生成时间 ${escapeCell(selectedEvidence.generatedAt || '')}</span>
+        <button class="mini secondary" data-action="refresh-evidence">刷新关联证据</button>
+        ${errors.map(err => `<span class="bad" title="${escapeCell(err)}">${escapeCell(err)}</span>`).join('')}
+      </div><div class="detail-overview">${blocks.join('')}</div>`;
+    }
+
+    function renderDetail() {
+      renderDetailShell(false);
+      tabBasic.classList.toggle('active', activeTab === 'basic');
+      tabModules.classList.toggle('active', activeTab === 'modules');
+      tabConnections.classList.toggle('active', activeTab === 'connections');
+      tabEvidence.classList.toggle('active', activeTab === 'evidence');
+
+      if (activeTab === 'basic') {
+        renderBasicDetail();
+        return;
+      }
+
+      if (activeTab === 'modules') {
+        if (moduleError) {
+          detailBody.innerHTML = `<div class="empty bad">${escapeCell(moduleError)}</div>`;
+          return;
+        }
+        if (!selectedModules.length) {
+          detailBody.innerHTML = '<div class="empty">没有模块数据</div>';
+          return;
+        }
+        detailBody.innerHTML = `<table class="detail-table">
+          <thead>
+            <tr>
+              <th class="name">模块名</th>
+              <th class="md5">MD5</th>
+              <th class="signature">签名信息</th>
+              <th class="size">大小 KB</th>
+              <th class="actions">操作</th>
+              <th class="path">模块路径</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${selectedModules.map(m => {
+              const hashText = m.md5 || m.hashError || '';
+              const copyDisabled = m.md5 ? '' : 'disabled';
+              return `<tr>
+                <td class="name" title="${escapeCell(m.name)}">${escapeCell(m.name)}</td>
+                <td class="md5 ${m.md5 ? '' : 'warn'}" title="${escapeCell(hashText)}">${escapeCell(hashText)}</td>
+                <td class="signature">${renderSignature(m.signature, m.signatureMsg)}</td>
+                <td class="size" title="${escapeCell(m.sizeKb)}">${escapeCell(m.sizeKb)}</td>
+                <td class="actions"><button class="mini" data-action="copy-module-md5" data-md5="${escapeCell(m.md5)}" ${copyDisabled}>复制</button></td>
+                <td class="path" title="${escapeCell(m.path)}">${escapeCell(m.path)}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>`;
+        return;
+      }
+
+      if (activeTab === 'evidence') {
+        renderEvidenceDetail();
+        return;
+      }
+
+      if (connectionError) {
+        detailBody.innerHTML = `<div class="empty bad">${escapeCell(connectionError)}</div>`;
+        return;
+      }
+      if (loadingConnections) {
+        detailBody.innerHTML = '<div class="empty">正在刷新网络连接...</div>';
+        return;
+      }
+      if (!selectedConnections.length) {
+        detailBody.innerHTML = '<div class="empty">没有网络连接</div>';
+        return;
+      }
+      detailBody.innerHTML = `<table class="detail-table">
+        <thead>
+          <tr>
+            <th class="signature">协议</th>
+            <th class="endpoint">本地地址</th>
+            <th class="endpoint">远程地址</th>
+            <th class="state">状态</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${selectedConnections.map(c => `<tr>
+            <td class="signature">${escapeCell(c.protocol)}</td>
+            <td class="endpoint" title="${escapeCell(c.local)}">${escapeCell(c.local)}</td>
+            <td class="endpoint" title="${escapeCell(c.remote)}">${escapeCell(c.remote)}</td>
+            <td class="state" title="${escapeCell(c.state)}">${escapeCell(c.state)}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>`;
+    }
+
+    async function loadJSON(url, options) {
+      const res = await fetch(url, options || { cache: 'no-store' });
+      if (!res.ok) {
+        const msg = await res.text();
+        throw new Error(msg || res.statusText);
+      }
+      return res.json();
+    }
+
+    async function selectProcess(pid) {
+      selectedPid = pid;
+      selectedModules = [];
+      selectedConnections = [];
+      selectedEvidence = null;
+      moduleError = '';
+      connectionError = '';
+      evidenceError = '';
+      loadingEvidence = false;
+      activeTab = 'basic';
+      renderRows();
+      renderDetailShell(true);
+
+      const [mods, conns] = await Promise.allSettled([
+        loadJSON(`/api/process/${pid}/modules`),
+        loadJSON(`/api/process/${pid}/connections`)
+      ]);
+
+      if (mods.status === 'fulfilled') {
+        selectedModules = mods.value.items || [];
+      } else {
+        moduleError = mods.reason.message;
+      }
+
+      if (conns.status === 'fulfilled') {
+        selectedConnections = conns.value.items || [];
+      } else {
+        connectionError = conns.reason.message;
+      }
+
+      renderDetail();
+    }
+
+    async function load() {
+      statusEl.textContent = '正在采集进程、签名、连接和 MD5...';
+      rows.innerHTML = '<tr><td class="empty" colspan="12">正在加载进程...</td></tr>';
+      const data = await loadJSON('/api/processes');
+      processes = data.items || [];
+      const preferred = processes.find(p => p.md5 && p.signature !== '系统文件') || processes.find(p => p.md5) || processes[0];
+      selectedPid = preferred ? preferred.pid : null;
+      renderRows();
+      if (selectedPid != null) {
+        await selectProcess(selectedPid);
+      } else {
+        renderDetailShell(false);
+      }
+    }
+
+    function toCSV(items) {
+      const header = ['PID', '进程名称', 'MD5', '签名信息', '连接数', '父PID', '父进程', '进程创建时间', '可执行文件路径', '文件创建时间', '文件修改时间', '错误'];
+      const lines = [header, ...items.map(p => [
+        p.pid, p.name, p.md5, p.signature, p.connectionCount, p.parentPid, p.parentName,
+        p.createdAt, p.path, p.fileCreated, p.fileModified, p.hashError || p.pathError || p.signatureMsg || ''
+      ])];
+      return lines.map(line => line.map(v => `"${text(v).replace(/"/g, '""')}"`).join(',')).join('\r\n');
+    }
+
+    async function copyText(value, label) {
+      await navigator.clipboard.writeText(value);
+      statusEl.textContent = label;
+    }
+
+    function downloadCSV(url) {
+      const a = document.createElement('a');
+      a.href = url;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }
+
+    function filterQueryString() {
+      const q = filter.value.trim();
+      return q ? `?q=${encodeURIComponent(q)}` : '';
+    }
+
+    async function openPath(pid) {
+      await loadJSON(`/api/process/${pid}/open-path`, { method: 'POST' });
+      statusEl.textContent = `已打开 PID ${pid} 的文件位置`;
+    }
+
+    document.getElementById('refresh').addEventListener('click', () => {
+      load().catch(err => {
+        rows.innerHTML = `<tr><td class="empty bad" colspan="12">${escapeCell(err.message)}</td></tr>`;
+        statusEl.textContent = '加载失败';
+      });
+    });
+
+    rows.addEventListener('click', event => {
+      const button = event.target.closest('button[data-action]');
+      if (button) {
+        event.stopPropagation();
+        const pid = Number(button.dataset.pid);
+        const p = processes.find(item => item.pid === pid);
+        if (button.dataset.action === 'copy-md5' && p && p.md5) {
+          copyText(p.md5, `已复制 MD5: ${p.md5}`);
+        }
+        if (button.dataset.action === 'open-path') {
+          openPath(pid).catch(err => statusEl.textContent = err.message);
+        }
+        return;
+      }
+
+      const tr = event.target.closest('tr[data-pid]');
+      if (!tr) return;
+      selectProcess(Number(tr.dataset.pid)).catch(err => {
+        detailBody.innerHTML = `<div class="empty bad">${escapeCell(err.message)}</div>`;
+      });
+    });
+
+    detailBody.addEventListener('click', event => {
+      const evidenceButton = event.target.closest('button[data-action="refresh-evidence"]');
+      if (evidenceButton) {
+        loadSelectedEvidence(true).then(renderDetail);
+        return;
+      }
+      const button = event.target.closest('button[data-action="copy-module-md5"]');
+      if (!button || !button.dataset.md5) return;
+      copyText(button.dataset.md5, `已复制模块 MD5: ${button.dataset.md5}`);
+    });
+
+    detailCopyMD5.addEventListener('click', () => {
+      const p = selectedProcess();
+      if (p && p.md5) copyText(p.md5, `已复制 MD5: ${p.md5}`);
+    });
+
+    detailOpenPath.addEventListener('click', () => {
+      if (selectedPid != null) {
+        openPath(selectedPid).catch(err => statusEl.textContent = err.message);
+      }
+    });
+
+    detailRefreshConnections.addEventListener('click', () => {
+      activeTab = 'connections';
+      renderDetail();
+      reloadSelectedConnections().then(renderDetail);
+    });
+
+    tabBasic.addEventListener('click', () => {
+      activeTab = 'basic';
+      renderDetail();
+    });
+
+    tabModules.addEventListener('click', () => {
+      activeTab = 'modules';
+      renderDetail();
+    });
+
+    tabConnections.addEventListener('click', () => {
+      activeTab = 'connections';
+      renderDetail();
+      reloadSelectedConnections().then(renderDetail);
+    });
+
+    tabEvidence.addEventListener('click', () => {
+      activeTab = 'evidence';
+      renderDetail();
+      loadSelectedEvidence(false).then(renderDetail);
+    });
+
+    filter.addEventListener('input', renderRows);
+    connectionSort.addEventListener('change', renderRows);
+
+    document.getElementById('copy-md5').addEventListener('click', () => {
+      const hashes = visibleItems().map(p => p.md5).filter(Boolean);
+      const unique = [...new Set(hashes)];
+      copyText(unique.join('\n'), `已复制 ${unique.length} 个 MD5`);
+    });
+
+    document.getElementById('export-csv').addEventListener('click', () => {
+      statusEl.textContent = '正在生成 CSV...';
+      downloadCSV(`/api/processes.csv${filterQueryString()}`);
+    });
+
+    load().catch(err => {
+      rows.innerHTML = `<tr><td class="empty bad" colspan="12">${escapeCell(err.message)}</td></tr>`;
+      statusEl.textContent = '加载失败';
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WinTraceLens - 主机信息</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --panel: #ffffff;
+      --line: #d9e0ea;
+      --line-soft: #edf1f6;
+      --text: #182235;
+      --muted: #5b6678;
+      --head: #243447;
+      --head-2: #edf3f8;
+      --accent: #1769aa;
+      --accent-dark: #0f4e82;
+      --ok: #176b43;
+      --warn: #9a5200;
+      --bad: #a41220;
+      --info: #2b5b91;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+      font-size: 14px;
+      letter-spacing: 0;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 13px 18px;
+      background: var(--head);
+      color: #fff;
+    }
+    h1 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 650;
+      letter-spacing: 0;
+    }
+    main {
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr);
+      gap: 10px;
+      height: calc(100vh - 48px);
+      padding: 12px;
+    }
+    .toolbar, .tabs {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    input {
+      width: min(600px, 100%);
+      height: 34px;
+      padding: 6px 10px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: #fff;
+      color: var(--text);
+      font: inherit;
+    }
+    button, a.button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: 34px;
+      padding: 0 12px;
+      border: 1px solid var(--accent-dark);
+      border-radius: 4px;
+      background: var(--accent);
+      color: #fff;
+      cursor: pointer;
+      font: inherit;
+      text-decoration: none;
+    }
+    button.secondary, a.button.secondary {
+      border-color: var(--line);
+      background: #fff;
+      color: var(--text);
+    }
+    button.tab {
+      border-color: var(--line);
+      background: #fff;
+      color: var(--text);
+    }
+    button.tab.active {
+      border-color: var(--accent);
+      background: #e8f2fb;
+      color: var(--accent-dark);
+    }
+    .status {
+      margin-left: auto;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .panel {
+      min-height: 0;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel);
+      overflow: hidden;
+    }
+    .table-wrap {
+      height: 100%;
+      overflow: auto;
+    }
+    table {
+      width: 100%;
+      min-width: 1380px;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+    th, td {
+      border-bottom: 1px solid var(--line-soft);
+      padding: 7px 8px;
+      text-align: left;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: var(--head-2);
+      color: #26384f;
+      font-weight: 650;
+    }
+    tbody tr:hover td { background: #f3f8ff; }
+    .name { width: 190px; }
+    .short { width: 120px; }
+    .md5 {
+      width: 270px;
+      font-family: Consolas, "Courier New", monospace;
+    }
+    .signature { width: 150px; }
+    .path { width: 430px; }
+    .command { width: 520px; }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      max-width: 100%;
+      height: 24px;
+      padding: 0 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #f8fafc;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      vertical-align: middle;
+    }
+    .pill.system { border-color: #b8d7c8; background: #edf8f2; color: var(--ok); }
+    .pill.signed { border-color: #c7d7ee; background: #eef5fd; color: var(--info); }
+    .pill.unsigned { border-color: #f0ce9f; background: #fff7e8; color: var(--warn); }
+    .pill.bad { border-color: #edb4bd; background: #fff0f2; color: var(--bad); }
+    .empty { padding: 18px; color: var(--muted); }
+    .bad { color: var(--bad); }
+  </style>
+  <link rel="stylesheet" href="/nav.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header>
+    <h1>WinTraceLens</h1>
+    <div class="app-meta">
+      <span class="release-badge" data-app-version>1.0 基础版</span>
+      <span class="permission-badge unknown" data-admin-status>权限检测中</span>
+      <span class="module-title">主机信息与持久化项</span>
+    </div>
+  </header>
+  <main>
+    <div class="toolbar">
+      <nav class="top-nav" aria-label="主要功能">
+        <a class="nav-link" href="/">进程信息</a>
+        <a class="nav-link" aria-current="page" href="/host.html">主机信息</a>
+        <a class="nav-link" href="/findings.html">关注项</a>
+        <a class="nav-link" href="/threat.html">威胁分析</a>
+        <a class="nav-link" href="/filetrace.html">文件痕迹</a>
+        <a class="nav-link" href="/history.html">历史通信</a>
+        <a class="nav-link" href="/security.html">事件日志</a>
+        <a class="nav-link" href="/health.html">日志健康</a>
+        <a class="nav-link" href="/yara.html">YARA扫描</a>
+        <a class="nav-link" href="/ai.html">AI分析</a>
+      </nav>
+      <span class="current-module">当前：主机信息</span>
+      <button id="refresh">刷新主机信息</button>
+      <button id="export-csv" class="secondary" disabled>导出 CSV</button>
+      <input id="filter" placeholder="按名称、路径、命令、MD5、签名、账户过滤">
+      <span id="status" class="status">尚未加载</span>
+    </div>
+    <div class="tabs">
+      <button class="tab active" data-tab="services">服务</button>
+      <button class="tab" data-tab="tasks">计划任务</button>
+      <button class="tab" data-tab="startup">启动项</button>
+      <button class="tab" data-tab="users">用户</button>
+      <button class="tab" data-tab="ifeo">镜像劫持</button>
+    </div>
+    <section class="panel">
+      <div id="table" class="table-wrap">
+        <div class="empty">正在加载主机信息...</div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const table = document.getElementById('table');
+    const filter = document.getElementById('filter');
+    const statusEl = document.getElementById('status');
+    const exportCSV = document.getElementById('export-csv');
+    let snapshot = null;
+    let activeTab = 'services';
+
+    function text(value) {
+      return value == null ? '' : String(value);
+    }
+
+    function escapeCell(value) {
+      return text(value).replace(/[&<>"']/g, ch => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[ch]));
+    }
+
+    function signatureClass(value) {
+      if (value === '系统文件') return 'system';
+      if (value === '已签名') return 'signed';
+      if (value === '无签名请注意!!!') return 'unsigned';
+      if (value === '签名异常') return 'bad';
+      return '';
+    }
+
+    function renderSignature(value, message) {
+      if (!value) return '';
+      return `<span class="pill ${signatureClass(value)}" title="${escapeCell(message || value)}">${escapeCell(value)}</span>`;
+    }
+
+    function visible(items) {
+      const q = filter.value.trim().toLowerCase();
+      if (!q) return items;
+      return items.filter(item => Object.values(item).some(v => text(v).toLowerCase().includes(q)));
+    }
+
+    function render() {
+      if (!snapshot) {
+        table.innerHTML = '<div class="empty">正在加载主机信息...</div>';
+        return;
+      }
+      document.querySelectorAll('button.tab').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.tab === activeTab);
+      });
+
+      if (activeTab === 'services') return renderServices();
+      if (activeTab === 'tasks') return renderTasks();
+      if (activeTab === 'startup') return renderStartup();
+      if (activeTab === 'users') return renderUsers();
+      if (activeTab === 'ifeo') return renderIFEO();
+    }
+
+    function renderServices() {
+      const items = visible(snapshot.services || []);
+      statusEl.textContent = `服务 ${items.length} / ${(snapshot.services || []).length}`;
+      table.innerHTML = `<table><thead><tr>
+        <th class="name">服务名</th><th class="name">显示名</th><th class="short">状态</th><th class="short">启动</th>
+        <th class="short">账户</th><th class="md5">MD5</th><th class="signature">签名</th><th class="path">路径</th><th class="command">命令</th>
+      </tr></thead><tbody>${items.map(x => `<tr>
+        <td class="name" title="${escapeCell(x.name)}">${escapeCell(x.name)}</td>
+        <td class="name" title="${escapeCell(x.displayName)}">${escapeCell(x.displayName)}</td>
+        <td class="short">${escapeCell(x.state)}</td><td class="short">${escapeCell(x.startMode)}</td>
+        <td class="short" title="${escapeCell(x.account)}">${escapeCell(x.account)}</td>
+        <td class="md5" title="${escapeCell(x.md5 || x.hashError)}">${escapeCell(x.md5 || x.hashError)}</td>
+        <td class="signature">${renderSignature(x.signature, x.signatureMsg)}</td>
+        <td class="path" title="${escapeCell(x.path)}">${escapeCell(x.path)}</td>
+        <td class="command" title="${escapeCell(x.command)}">${escapeCell(x.command)}</td>
+      </tr>`).join('')}</tbody></table>`;
+    }
+
+    function renderTasks() {
+      const items = visible(snapshot.scheduledTasks || []);
+      statusEl.textContent = `计划任务 ${items.length} / ${(snapshot.scheduledTasks || []).length}`;
+      table.innerHTML = `<table><thead><tr>
+        <th class="name">任务名</th><th class="path">任务路径</th><th class="short">状态</th><th class="short">运行状态</th><th class="short">作者</th>
+        <th class="md5">MD5</th><th class="signature">签名</th><th class="path">可执行路径</th><th class="command">命令/参数</th>
+      </tr></thead><tbody>${items.map(x => `<tr>
+        <td class="name" title="${escapeCell(x.name)}">${escapeCell(x.name)}</td>
+        <td class="path" title="${escapeCell(x.path)}">${escapeCell(x.path)}</td>
+        <td class="short" title="${escapeCell(x.state)}">${escapeCell(x.state)}</td>
+        <td class="short" title="${escapeCell(x.status)}">${escapeCell(x.status)}</td>
+        <td class="short" title="${escapeCell(x.author)}">${escapeCell(x.author)}</td>
+        <td class="md5" title="${escapeCell(x.md5 || x.hashError)}">${escapeCell(x.md5 || x.hashError)}</td>
+        <td class="signature">${renderSignature(x.signature, x.signatureMsg)}</td>
+        <td class="path" title="${escapeCell(x.executable)}">${escapeCell(x.executable)}</td>
+        <td class="command" title="${escapeCell(x.command + ' ' + x.arguments)}">${escapeCell(x.command + ' ' + x.arguments)}</td>
+      </tr>`).join('')}</tbody></table>`;
+    }
+
+    function renderStartup() {
+      const items = visible(snapshot.startupItems || []);
+      statusEl.textContent = `启动项 ${items.length} / ${(snapshot.startupItems || []).length}`;
+      table.innerHTML = `<table><thead><tr>
+        <th class="short">来源</th><th class="name">名称</th><th class="md5">MD5</th><th class="signature">签名</th>
+        <th class="path">路径</th><th class="command">命令</th><th class="path">位置</th>
+      </tr></thead><tbody>${items.map(x => `<tr>
+        <td class="short">${escapeCell(x.source)}</td><td class="name" title="${escapeCell(x.name)}">${escapeCell(x.name)}</td>
+        <td class="md5" title="${escapeCell(x.md5 || x.hashError)}">${escapeCell(x.md5 || x.hashError)}</td>
+        <td class="signature">${renderSignature(x.signature, x.signatureMsg)}</td>
+        <td class="path" title="${escapeCell(x.path)}">${escapeCell(x.path)}</td>
+        <td class="command" title="${escapeCell(x.command)}">${escapeCell(x.command)}</td>
+        <td class="path" title="${escapeCell(x.location)}">${escapeCell(x.location)}</td>
+      </tr>`).join('')}</tbody></table>`;
+    }
+
+    function renderUsers() {
+      const items = visible(snapshot.users || []);
+      statusEl.textContent = `用户 ${items.length} / ${(snapshot.users || []).length}`;
+      table.innerHTML = `<table><thead><tr>
+        <th class="name">用户名</th><th class="path">SID</th><th class="short">禁用</th><th class="short">锁定</th>
+        <th class="short">需要密码</th><th class="short">本地账户</th>
+      </tr></thead><tbody>${items.map(x => `<tr>
+        <td class="name">${escapeCell(x.name)}</td><td class="path" title="${escapeCell(x.sid)}">${escapeCell(x.sid)}</td>
+        <td class="short">${escapeCell(x.disabled)}</td><td class="short">${escapeCell(x.lockout)}</td>
+        <td class="short">${escapeCell(x.passwordRequired)}</td><td class="short">${escapeCell(x.localAccount)}</td>
+      </tr>`).join('')}</tbody></table>`;
+    }
+
+    function renderIFEO() {
+      const items = visible(snapshot.imageHijacks || []);
+      statusEl.textContent = `镜像劫持 ${items.length} / ${(snapshot.imageHijacks || []).length}`;
+      table.innerHTML = `<table><thead><tr>
+        <th class="name">目标镜像</th><th class="md5">Debugger MD5</th><th class="signature">签名</th>
+        <th class="path">Debugger 路径</th><th class="command">Debugger</th><th class="path">注册表路径</th>
+      </tr></thead><tbody>${items.map(x => `<tr>
+        <td class="name">${escapeCell(x.image)}</td>
+        <td class="md5" title="${escapeCell(x.md5 || x.hashError)}">${escapeCell(x.md5 || x.hashError)}</td>
+        <td class="signature">${renderSignature(x.signature, x.signatureMsg)}</td>
+        <td class="path" title="${escapeCell(x.path)}">${escapeCell(x.path)}</td>
+        <td class="command" title="${escapeCell(x.debugger)}">${escapeCell(x.debugger)}</td>
+        <td class="path" title="${escapeCell(x.registryPath)}">${escapeCell(x.registryPath)}</td>
+      </tr>`).join('')}</tbody></table>`;
+    }
+
+    function downloadCSV(url) {
+      const a = document.createElement('a');
+      a.href = url;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }
+
+    function hostCSVQueryString() {
+      const params = new URLSearchParams({ tab: activeTab });
+      const q = filter.value.trim();
+      if (q) params.set('q', q);
+      return params.toString();
+    }
+
+    async function load() {
+      statusEl.textContent = '正在采集主机信息...';
+      exportCSV.disabled = true;
+      table.innerHTML = '<div class="empty">正在采集主机信息...</div>';
+      const res = await fetch('/api/host', { cache: 'no-store' });
+      if (!res.ok) throw new Error(await res.text() || res.statusText);
+      snapshot = await res.json();
+      exportCSV.disabled = false;
+      if (snapshot.collectionErrors && snapshot.collectionErrors.length) {
+        statusEl.textContent = snapshot.collectionErrors.join(' | ');
+      }
+      render();
+    }
+
+    document.getElementById('refresh').addEventListener('click', () => {
+      load().catch(err => {
+        table.innerHTML = `<div class="empty bad">${escapeCell(err.message)}</div>`;
+        statusEl.textContent = '加载失败';
+      });
+    });
+    exportCSV.addEventListener('click', () => {
+      statusEl.textContent = '正在生成 CSV...';
+      downloadCSV(`/api/host.csv?${hostCSVQueryString()}`);
+    });
+    filter.addEventListener('input', render);
+    document.querySelectorAll('button.tab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        activeTab = btn.dataset.tab;
+        render();
+      });
+    });
+    load().catch(err => {
+      table.innerHTML = `<div class="empty bad">${escapeCell(err.message)}</div>`;
+      statusEl.textContent = '加载失败';
+    });
+  </script>
+</body>
+</html>

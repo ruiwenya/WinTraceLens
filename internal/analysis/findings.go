@@ -1,0 +1,230 @@
+package analysis
+
+import (
+	"fmt"
+	"sort"
+	"strings"
+
+	"github.com/ruiwenya/WinTraceLens/internal/host"
+	"github.com/ruiwenya/WinTraceLens/internal/process"
+	"github.com/ruiwenya/WinTraceLens/internal/selfidentity"
+)
+
+const (
+	levelHigh   = "高"
+	levelMedium = "中"
+	levelLow    = "低"
+
+	signatureUnsigned = "无签名请注意!!!"
+	signatureBad      = "签名异常"
+	signatureSystem   = "系统文件"
+)
+
+type Finding struct {
+	Level        string `json:"level"`
+	Source       string `json:"source"`
+	Name         string `json:"name"`
+	Reason       string `json:"reason"`
+	MD5          string `json:"md5"`
+	Signature    string `json:"signature"`
+	SignatureMsg string `json:"signatureMsg"`
+	Path         string `json:"path"`
+	Command      string `json:"command"`
+	Extra        string `json:"extra"`
+}
+
+func BuildFindings(processes []process.Info, snapshot host.Snapshot) []Finding {
+	var findings []Finding
+
+	for _, item := range processes {
+		if selfidentity.IsSelfProcess(item.PID, item.Path) {
+			continue
+		}
+		name := fmt.Sprintf("%s (PID %d)", item.Name, item.PID)
+		command := item.Path
+		extra := fmt.Sprintf("父进程: %s (%d), 连接数: %d", item.ParentName, item.ParentPID, item.ConnectionCount)
+		findings = append(findings, executableFindings("进程", name, item.MD5, item.Signature, item.SignatureMsg, item.Path, command, item.HashError, item.PathError, extra, item.ConnectionCount)...)
+	}
+
+	for _, item := range snapshot.Services {
+		extra := fmt.Sprintf("状态: %s, 启动: %s, 账户: %s", item.State, item.StartMode, item.Account)
+		findings = append(findings, executableFindings("服务", displayName(item.Name, item.DisplayName), item.MD5, item.Signature, item.SignatureMsg, item.Path, item.Command, item.HashError, "", extra, 0)...)
+	}
+
+	for _, item := range snapshot.ScheduledTasks {
+		if item.Executable == "" && item.MD5 == "" && item.HashError == "" && item.Signature == "" {
+			continue
+		}
+		extra := fmt.Sprintf("任务路径: %s, 状态: %s/%s, 作者: %s", item.Path, item.State, item.Status, item.Author)
+		command := strings.TrimSpace(item.Command + " " + item.Arguments)
+		findings = append(findings, executableFindings("计划任务", item.Name, item.MD5, item.Signature, item.SignatureMsg, item.Executable, command, item.HashError, "", extra, 0)...)
+	}
+
+	for _, item := range snapshot.StartupItems {
+		extra := fmt.Sprintf("来源: %s, 位置: %s", item.Source, item.Location)
+		findings = append(findings, executableFindings("启动项", item.Name, item.MD5, item.Signature, item.SignatureMsg, item.Path, item.Command, item.HashError, "", extra, 0)...)
+	}
+
+	for _, item := range snapshot.ImageHijacks {
+		reason := "存在 Image File Execution Options Debugger 项"
+		if item.Signature == signatureBad || item.Signature == signatureUnsigned {
+			reason += "，且 Debugger " + item.Signature
+		}
+		findings = append(findings, Finding{
+			Level:        levelHigh,
+			Source:       "镜像劫持",
+			Name:         item.Image,
+			Reason:       reason,
+			MD5:          item.MD5,
+			Signature:    item.Signature,
+			SignatureMsg: item.SignatureMsg,
+			Path:         item.Path,
+			Command:      item.Debugger,
+			Extra:        item.RegistryPath,
+		})
+	}
+
+	for _, item := range snapshot.Users {
+		if item.LocalAccount && !item.Disabled && !item.PasswordRequired {
+			findings = append(findings, Finding{
+				Level:  levelMedium,
+				Source: "用户",
+				Name:   item.Name,
+				Reason: "启用的本地账户未要求密码",
+				Extra:  item.SID,
+			})
+		}
+	}
+
+	sort.SliceStable(findings, func(i, j int) bool {
+		if severityRank(findings[i].Level) != severityRank(findings[j].Level) {
+			return severityRank(findings[i].Level) > severityRank(findings[j].Level)
+		}
+		if findings[i].Source != findings[j].Source {
+			return findings[i].Source < findings[j].Source
+		}
+		return findings[i].Name < findings[j].Name
+	})
+	return findings
+}
+
+func executableFindings(source, name, md5, signature, signatureMsg, path, command, hashError, pathError, extra string, connectionCount int) []Finding {
+	var findings []Finding
+	if source == "进程" && selfidentity.IsSelfExecutablePath(path) {
+		return findings
+	}
+	if signature == signatureSystem {
+		return findings
+	}
+
+	if signature == signatureBad {
+		findings = append(findings, Finding{
+			Level:        levelHigh,
+			Source:       source,
+			Name:         name,
+			Reason:       "签名异常",
+			MD5:          md5,
+			Signature:    signature,
+			SignatureMsg: signatureMsg,
+			Path:         path,
+			Command:      command,
+			Extra:        extra,
+		})
+	}
+
+	if signature == signatureUnsigned {
+		level := levelMedium
+		reason := "无签名可执行文件"
+		if connectionCount > 0 {
+			level = levelHigh
+			reason = fmt.Sprintf("无签名且存在网络连接 (%d)", connectionCount)
+		} else if isWritableLocation(path) {
+			level = levelHigh
+			reason = "无签名且位于用户可写路径"
+		}
+		findings = append(findings, Finding{
+			Level:        level,
+			Source:       source,
+			Name:         name,
+			Reason:       reason,
+			MD5:          md5,
+			Signature:    signature,
+			SignatureMsg: signatureMsg,
+			Path:         path,
+			Command:      command,
+			Extra:        extra,
+		})
+	}
+
+	if hashError != "" || pathError != "" {
+		reason := strings.TrimSpace(strings.Join([]string{hashError, pathError}, " "))
+		findings = append(findings, Finding{
+			Level:     levelMedium,
+			Source:    source,
+			Name:      name,
+			Reason:    "文件访问或 MD5 计算失败",
+			Signature: signature,
+			Path:      path,
+			Command:   command,
+			Extra:     strings.TrimSpace(extra + " " + reason),
+		})
+	}
+
+	if path != "" && isWritableLocation(path) && signature != signatureUnsigned && signature != signatureBad {
+		findings = append(findings, Finding{
+			Level:        levelLow,
+			Source:       source,
+			Name:         name,
+			Reason:       "可执行文件位于用户可写路径",
+			MD5:          md5,
+			Signature:    signature,
+			SignatureMsg: signatureMsg,
+			Path:         path,
+			Command:      command,
+			Extra:        extra,
+		})
+	}
+
+	return findings
+}
+
+func isWritableLocation(path string) bool {
+	lower := strings.ToLower(strings.ReplaceAll(path, "/", `\`))
+	for _, marker := range []string{
+		`\users\`,
+		`\appdata\`,
+		`\temp\`,
+		`\tmp\`,
+		`\downloads\`,
+		`\desktop\`,
+		`\public\`,
+		`\programdata\`,
+		`\recycler\`,
+		`\$recycle.bin\`,
+	} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func displayName(name, display string) string {
+	if display == "" || display == name {
+		return name
+	}
+	return name + " / " + display
+}
+
+func severityRank(level string) int {
+	switch level {
+	case levelHigh:
+		return 3
+	case levelMedium:
+		return 2
+	case levelLow:
+		return 1
+	default:
+		return 0
+	}
+}
