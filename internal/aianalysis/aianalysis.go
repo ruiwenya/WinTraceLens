@@ -781,13 +781,18 @@ func topConnections(processes []map[string]any, maxItems int) []map[string]any {
 		}
 		for _, conn := range raw {
 			out = append(out, map[string]any{
-				"pid":      conn.PID,
-				"process":  item["name"],
-				"path":     item["path"],
-				"protocol": conn.Protocol,
-				"local":    conn.Local,
-				"remote":   conn.Remote,
-				"state":    conn.State,
+				"pid":        conn.PID,
+				"process":    item["name"],
+				"path":       item["path"],
+				"protocol":   conn.Protocol,
+				"local":      conn.Local,
+				"localIp":    conn.LocalIP,
+				"localPort":  conn.LocalPort,
+				"remote":     conn.Remote,
+				"remoteIp":   conn.RemoteIP,
+				"remotePort": conn.RemotePort,
+				"remoteKind": conn.RemoteKind,
+				"state":      conn.State,
 			})
 			if len(out) >= limit {
 				return out

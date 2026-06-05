@@ -26,6 +26,7 @@ type Options struct {
 type ModuleInfo struct {
 	Name         string `json:"name"`
 	Path         string `json:"path"`
+	BaseAddress  string `json:"baseAddress"`
 	SizeKB       uint32 `json:"sizeKb"`
 	MD5          string `json:"md5"`
 	Signature    string `json:"signature"`
@@ -34,9 +35,14 @@ type ModuleInfo struct {
 }
 
 type ConnectionInfo struct {
-	PID      uint32 `json:"pid"`
-	Protocol string `json:"protocol"`
-	Local    string `json:"local"`
-	Remote   string `json:"remote"`
-	State    string `json:"state"`
+	PID        uint32 `json:"pid"`
+	Protocol   string `json:"protocol"`
+	Local      string `json:"local"`
+	LocalIP    string `json:"localIp"`
+	LocalPort  uint16 `json:"localPort"`
+	Remote     string `json:"remote"`
+	RemoteIP   string `json:"remoteIp"`
+	RemotePort uint16 `json:"remotePort"`
+	RemoteKind string `json:"remoteKind"`
+	State      string `json:"state"`
 }

@@ -130,6 +130,28 @@
       background: #fff7e8;
       color: var(--warn);
     }
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 26px;
+      padding: 3px 9px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fff;
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .tag.warn {
+      border-color: #f0ce9f;
+      background: #fff7e8;
+      color: var(--warn);
+    }
+    .tag.info {
+      border-color: #c7d7ee;
+      background: #eef5fd;
+      color: #2b5b91;
+    }
     .panel {
       min-height: 0;
       border: 1px solid var(--line);
@@ -223,6 +245,7 @@
     <div class="tabs">
       <button class="tab active" data-tab="connections" data-label="连接历史">连接历史</button>
       <button class="tab" data-tab="dns" data-label="DNS 记录">DNS 记录</button>
+      <button class="tab" data-tab="live" data-label="当前连接">当前连接</button>
       <button class="tab" data-tab="all" data-label="全部证据">全部证据</button>
     </div>
     <div id="meta" class="meta"></div>
@@ -243,6 +266,7 @@
     const endDate = document.getElementById('end-date');
     const maxRecords = document.getElementById('max-records');
     let records = [];
+    let liveRecords = [];
     let collectionErrors = [];
     let activeTab = 'connections';
 
@@ -257,10 +281,24 @@
     }
 
     function visibleItems() {
+      if (activeTab === 'live') {
+        return visibleLiveItems();
+      }
       const tabItems = records.filter(tabMatches);
       const q = filter.value.trim().toLowerCase();
       if (!q) return tabItems;
-      return tabItems.filter(item => Object.values(item).some(v => text(v).toLowerCase().includes(q)));
+      return tabItems.filter(item => queryMatches(item, q));
+    }
+
+    function visibleLiveItems() {
+      const q = filter.value.trim().toLowerCase();
+      if (!q) return liveRecords;
+      return liveRecords.filter(item => queryMatches(item, q));
+    }
+
+    function queryMatches(item, q) {
+      const haystack = Object.values(item).map(v => text(v).toLowerCase()).join(' ');
+      return q.split(/\s+/).filter(Boolean).every(part => haystack.includes(part));
     }
 
     function isConnectionRecord(item) {
@@ -274,11 +312,13 @@
     function tabMatches(item) {
       if (activeTab === 'connections') return isConnectionRecord(item);
       if (activeTab === 'dns') return isDNSRecord(item);
+      if (activeTab === 'live') return false;
       return true;
     }
 
     function tabCount(tab) {
       const previous = activeTab;
+      if (tab === 'live') return liveRecords.length;
       activeTab = tab;
       const count = records.filter(tabMatches).length;
       activeTab = previous;
@@ -296,8 +336,9 @@
       const sources = [...new Set(items.map(x => x.source).filter(Boolean))];
       const connectionCount = records.filter(isConnectionRecord).length;
       const dnsCount = records.filter(isDNSRecord).length;
+      const externalCount = liveRecords.filter(x => x.remoteKind === '公网/外部').length;
       const errors = collectionErrors.map(x => `<span class="error" title="${escapeCell(x)}">${escapeCell(x)}</span>`).join('');
-      meta.innerHTML = `<span>当前来源 ${sources.length}: ${escapeCell(sources.join(' / ') || '无')}</span><span>连接历史 ${connectionCount}</span><span>DNS 记录 ${dnsCount}</span>${errors}`;
+      meta.innerHTML = `<span>当前来源 ${sources.length}: ${escapeCell(sources.join(' / ') || '无')}</span><span class="tag info">连接历史 ${connectionCount}</span><span class="tag info">DNS 记录 ${dnsCount}</span><span class="tag ${externalCount ? 'warn' : ''}">当前公网连接 ${externalCount}</span>${errors}`;
     }
 
     function render() {
@@ -306,7 +347,11 @@
       renderMeta(items);
       const tabTotal = records.filter(tabMatches).length;
       const activeLabel = document.querySelector(`button.tab[data-tab="${activeTab}"]`)?.dataset.label || '历史记录';
-      statusEl.textContent = `${activeLabel} ${items.length} / ${tabTotal}`;
+      statusEl.textContent = `${activeLabel} ${items.length} / ${activeTab === 'live' ? liveRecords.length : tabTotal}`;
+      if (activeTab === 'live') {
+        renderLive(items);
+        return;
+      }
       if (!items.length) {
         if (activeTab === 'connections') {
           table.innerHTML = '<div class="empty">当前没有连接历史记录。Windows 默认不保存完整历史连接；需要启用 Sysmon 网络事件、Windows Filtering Platform 连接审计，或 Windows 防火墙日志后才会有连接级历史记录。DNS 证据请切换到“DNS 记录”页签查看。</div>';
@@ -337,6 +382,29 @@
       </tr>`).join('')}</tbody></table>`;
     }
 
+    function renderLive(items) {
+      if (!items.length) {
+        table.innerHTML = '<div class="empty">当前没有匹配的实时网络连接。实时连接只代表当前快照，不等于历史通信证据。</div>';
+        return;
+      }
+      table.innerHTML = `<table><thead><tr>
+        <th class="time">时间</th><th class="source">来源</th><th class="process">进程</th><th class="pid">PID</th>
+        <th class="proto">协议</th><th class="endpoint">本地地址</th><th class="endpoint">远程地址</th>
+        <th class="action">远程类型</th><th class="action">状态</th><th class="details">路径</th>
+      </tr></thead><tbody>${items.map(x => `<tr>
+        <td class="time">当前</td>
+        <td class="source">实时连接</td>
+        <td class="process" title="${escapeCell(x.process)}">${escapeCell(x.process)}</td>
+        <td class="pid" title="${escapeCell(x.pid)}">${escapeCell(x.pid)}</td>
+        <td class="proto" title="${escapeCell(x.protocol)}">${escapeCell(x.protocol)}</td>
+        <td class="endpoint" title="${escapeCell(x.local)}">${escapeCell(x.local)}</td>
+        <td class="endpoint" title="${escapeCell(x.remote)}">${escapeCell(x.remote)}</td>
+        <td class="action" title="${escapeCell(x.remoteKind)}">${escapeCell(x.remoteKind)}</td>
+        <td class="action" title="${escapeCell(x.state)}">${escapeCell(x.state)}</td>
+        <td class="details" title="${escapeCell(x.path)}">${escapeCell(x.path)}</td>
+      </tr>`).join('')}</tbody></table>`;
+    }
+
     async function loadJSON(url, options) {
       const res = await fetch(url, options || { cache: 'no-store' });
       if (!res.ok) {
@@ -355,6 +423,12 @@
     }
 
     function queryString() {
+      if (activeTab === 'live') {
+        const params = new URLSearchParams();
+        const q = filter.value.trim();
+        if (q) params.set('q', q);
+        return params.toString();
+      }
       const params = new URLSearchParams({ max: maxRecords.value || '1000', category: activeTab });
       const q = filter.value.trim();
       if (q) params.set('q', q);
@@ -375,9 +449,22 @@
       exportCSV.disabled = true;
       meta.innerHTML = '';
       table.innerHTML = '<div class="empty">正在采集 Sysmon、安全日志、防火墙日志、DNS Client 日志和 DNS 缓存...</div>';
-      const data = await loadJSON(`/api/network/history?${loadQueryString()}`);
+      const [historyData, liveData] = await Promise.allSettled([
+        loadJSON(`/api/network/history?${loadQueryString()}`),
+        loadJSON('/api/network/live')
+      ]);
+      if (historyData.status !== 'fulfilled') {
+        throw historyData.reason;
+      }
+      const data = historyData.value;
       records = data.records || [];
       collectionErrors = data.collectionErrors || [];
+      if (liveData.status === 'fulfilled') {
+        liveRecords = liveData.value.items || [];
+      } else {
+        liveRecords = [];
+        collectionErrors = [...collectionErrors, `实时连接: ${liveData.reason.message}`];
+      }
       exportCSV.disabled = false;
       statusEl.textContent = `生成时间 ${data.generatedAt || ''}，记录 ${records.length}`;
       render();
@@ -392,7 +479,12 @@
 
     exportCSV.addEventListener('click', () => {
       statusEl.textContent = '正在生成 CSV...';
-      downloadCSV(`/api/network/history.csv?${queryString()}`);
+      if (activeTab === 'live') {
+        const qs = queryString();
+        downloadCSV(`/api/network/live.csv${qs ? '?' + qs : ''}`);
+      } else {
+        downloadCSV(`/api/network/history.csv?${queryString()}`);
+      }
     });
 
     document.querySelectorAll('button.tab').forEach(btn => {
@@ -416,6 +508,22 @@
       statusEl.textContent = '加载失败';
     }));
 
+    function applyInitialQuery() {
+      const params = new URLSearchParams(window.location.search);
+      const category = params.get('category');
+      if (category && ['connections', 'dns', 'live', 'all'].includes(category)) {
+        activeTab = category;
+      }
+      const q = params.get('q');
+      if (q) {
+        filter.value = q;
+      }
+      if (params.get('start')) startDate.value = params.get('start');
+      if (params.get('end')) endDate.value = params.get('end');
+      if (params.get('max')) maxRecords.value = params.get('max');
+    }
+
+    applyInitialQuery();
     load().catch(err => {
       table.innerHTML = `<div class="empty bad">${escapeCell(err.message)}</div>`;
       statusEl.textContent = '加载失败';

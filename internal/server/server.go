@@ -63,6 +63,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/files/traces.csv", s.handleFileTracesCSV)
 	mux.HandleFunc("/api/network/history", s.handleNetworkHistory)
 	mux.HandleFunc("/api/network/history.csv", s.handleNetworkHistoryCSV)
+	mux.HandleFunc("/api/network/live", s.handleNetworkLive)
+	mux.HandleFunc("/api/network/live.csv", s.handleNetworkLiveCSV)
 	mux.HandleFunc("/api/security/events", s.handleSecurityEvents)
 	mux.HandleFunc("/api/security/events.csv", s.handleSecurityEventsCSV)
 	mux.HandleFunc("/api/log/health", s.handleLogHealth)
@@ -406,6 +408,104 @@ func (s *Server) handleNetworkHistoryCSV(w http.ResponseWriter, r *http.Request)
 	writeCSV(w, "network-history", []string{"时间", "来源", "事件ID", "进程", "PID", "协议", "本地地址", "远程地址", "DNS 查询", "动作", "用户", "详情"}, rows)
 }
 
+type liveConnectionItem struct {
+	PID        uint32 `json:"pid"`
+	Process    string `json:"process"`
+	Path       string `json:"path"`
+	ParentPID  uint32 `json:"parentPid"`
+	ParentName string `json:"parentName"`
+	Protocol   string `json:"protocol"`
+	Local      string `json:"local"`
+	LocalIP    string `json:"localIp"`
+	LocalPort  uint16 `json:"localPort"`
+	Remote     string `json:"remote"`
+	RemoteIP   string `json:"remoteIp"`
+	RemotePort uint16 `json:"remotePort"`
+	RemoteKind string `json:"remoteKind"`
+	State      string `json:"state"`
+}
+
+func (s *Server) handleNetworkLive(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	items, err := s.collectLiveConnections()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	items = filterLiveConnections(items, r.URL.Query().Get("q"))
+	writeJSON(w, struct {
+		Items       []liveConnectionItem `json:"items"`
+		Count       int                  `json:"count"`
+		GeneratedAt string               `json:"generatedAt"`
+	}{
+		Items:       items,
+		Count:       len(items),
+		GeneratedAt: time.Now().Format("2006-01-02 15:04:05"),
+	})
+}
+
+func (s *Server) handleNetworkLiveCSV(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	items, err := s.collectLiveConnections()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	items = filterLiveConnections(items, r.URL.Query().Get("q"))
+	rows := make([][]string, 0, len(items))
+	for _, item := range items {
+		rows = append(rows, liveConnectionRow(item))
+	}
+	writeCSV(w, "network-live", []string{"PID", "进程", "父PID", "父进程", "协议", "本地地址", "本地IP", "本地端口", "远程地址", "远程IP", "远程端口", "远程类型", "状态", "路径"}, rows)
+}
+
+func (s *Server) collectLiveConnections() ([]liveConnectionItem, error) {
+	processes, err := process.Collect(process.Options{
+		SkipHashes:     true,
+		SkipSignatures: true,
+	})
+	if err != nil {
+		return nil, err
+	}
+	connections, err := process.CollectConnections()
+	if err != nil {
+		return nil, err
+	}
+	byPID := make(map[uint32]process.Info, len(processes))
+	for _, item := range processes {
+		byPID[item.PID] = item
+	}
+	items := make([]liveConnectionItem, 0, len(connections))
+	for _, conn := range connections {
+		proc := byPID[conn.PID]
+		items = append(items, liveConnectionItem{
+			PID:        conn.PID,
+			Process:    proc.Name,
+			Path:       proc.Path,
+			ParentPID:  proc.ParentPID,
+			ParentName: proc.ParentName,
+			Protocol:   conn.Protocol,
+			Local:      conn.Local,
+			LocalIP:    conn.LocalIP,
+			LocalPort:  conn.LocalPort,
+			Remote:     conn.Remote,
+			RemoteIP:   conn.RemoteIP,
+			RemotePort: conn.RemotePort,
+			RemoteKind: conn.RemoteKind,
+			State:      conn.State,
+		})
+	}
+	return items, nil
+}
+
 func (s *Server) handleSecurityEvents(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -668,12 +768,24 @@ func (s *Server) handleProcessAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.handleModules(w, pid)
+	case "modules.csv":
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		s.handleModulesCSV(w, pid)
 	case "connections":
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 		s.handleConnections(w, pid)
+	case "connections.csv":
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		s.handleConnectionsCSV(w, pid)
 	case "open-path":
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -766,6 +878,31 @@ func (s *Server) handleModules(w http.ResponseWriter, pid uint32) {
 	})
 }
 
+func (s *Server) handleModulesCSV(w http.ResponseWriter, pid uint32) {
+	items, err := process.Modules(pid, process.Options{
+		HashLimitBytes: s.options.HashLimitBytes,
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	rows := make([][]string, 0, len(items))
+	for _, item := range items {
+		rows = append(rows, []string{
+			item.Name,
+			item.MD5,
+			item.Signature,
+			item.SignatureMsg,
+			item.BaseAddress,
+			strconv.FormatUint(uint64(item.SizeKB), 10),
+			item.Path,
+			item.HashError,
+		})
+	}
+	writeCSV(w, fmt.Sprintf("process-%d-modules", pid), []string{"模块名", "MD5", "签名信息", "签名说明", "基址", "大小KB", "路径", "错误"}, rows)
+}
+
 func (s *Server) handleConnections(w http.ResponseWriter, pid uint32) {
 	items, err := process.Connections(pid)
 	if err != nil {
@@ -780,6 +917,20 @@ func (s *Server) handleConnections(w http.ResponseWriter, pid uint32) {
 		Items: items,
 		Count: len(items),
 	})
+}
+
+func (s *Server) handleConnectionsCSV(w http.ResponseWriter, pid uint32) {
+	items, err := process.Connections(pid)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	rows := make([][]string, 0, len(items))
+	for _, item := range items {
+		rows = append(rows, processConnectionRow(item))
+	}
+	writeCSV(w, fmt.Sprintf("process-%d-connections", pid), []string{"PID", "协议", "本地地址", "本地IP", "本地端口", "远程地址", "远程IP", "远程端口", "远程类型", "状态"}, rows)
 }
 
 func (s *Server) handleOpenPath(w http.ResponseWriter, pid uint32) {
@@ -847,6 +998,16 @@ func filterFindings(items []analysis.Finding, q string) []analysis.Finding {
 func matchesCSVQuery(q string, values []string) bool {
 	q = strings.ToLower(strings.TrimSpace(q))
 	if q == "" {
+		return true
+	}
+	haystack := strings.ToLower(strings.Join(values, " "))
+	parts := strings.Fields(q)
+	if len(parts) > 1 {
+		for _, part := range parts {
+			if !strings.Contains(haystack, part) {
+				return false
+			}
+		}
 		return true
 	}
 	for _, value := range values {
@@ -1060,6 +1221,50 @@ func historyRecordRow(item history.Record) []string {
 		item.User,
 		item.Details,
 	}
+}
+
+func processConnectionRow(item process.ConnectionInfo) []string {
+	return []string{
+		strconv.FormatUint(uint64(item.PID), 10),
+		item.Protocol,
+		item.Local,
+		item.LocalIP,
+		strconv.FormatUint(uint64(item.LocalPort), 10),
+		item.Remote,
+		item.RemoteIP,
+		strconv.FormatUint(uint64(item.RemotePort), 10),
+		item.RemoteKind,
+		item.State,
+	}
+}
+
+func liveConnectionRow(item liveConnectionItem) []string {
+	return []string{
+		strconv.FormatUint(uint64(item.PID), 10),
+		item.Process,
+		strconv.FormatUint(uint64(item.ParentPID), 10),
+		item.ParentName,
+		item.Protocol,
+		item.Local,
+		item.LocalIP,
+		strconv.FormatUint(uint64(item.LocalPort), 10),
+		item.Remote,
+		item.RemoteIP,
+		strconv.FormatUint(uint64(item.RemotePort), 10),
+		item.RemoteKind,
+		item.State,
+		item.Path,
+	}
+}
+
+func filterLiveConnections(items []liveConnectionItem, q string) []liveConnectionItem {
+	filtered := make([]liveConnectionItem, 0, len(items))
+	for _, item := range items {
+		if matchesCSVQuery(q, liveConnectionRow(item)) {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
 }
 
 func maxRecordsFromRequest(r *http.Request) int {

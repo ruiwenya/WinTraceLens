@@ -3,6 +3,7 @@
 package process
 
 import (
+	"fmt"
 	"os"
 	"sort"
 	"strings"
@@ -193,6 +194,7 @@ func Modules(pid uint32, opts Options) ([]ModuleInfo, error) {
 		modules = append(modules, ModuleInfo{
 			Name:         utf16String(entry.ModuleName[:]),
 			Path:         path,
+			BaseAddress:  fmt.Sprintf("0x%X", entry.ModBaseAddr),
 			SizeKB:       entry.ModBaseSize / 1024,
 			MD5:          md5Value,
 			Signature:    sig.Status,

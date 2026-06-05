@@ -380,6 +380,54 @@
       color: var(--muted);
     }
 
+    .summary-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--line-soft);
+      color: var(--muted);
+      background: #fbfcfe;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 2px 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fff;
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .tag.warn {
+      border-color: #f0ce9f;
+      background: #fff7e8;
+      color: var(--warn);
+    }
+
+    .tag.ok {
+      border-color: #b8d7c8;
+      background: #edf8f2;
+      color: var(--ok);
+    }
+
+    .tag.info {
+      border-color: #c7d7ee;
+      background: #eef5fd;
+      color: var(--info);
+    }
+
+    .tag.bad {
+      border-color: #edb4bd;
+      background: #fff0f2;
+      color: var(--bad);
+    }
+
     .empty {
       padding: 18px;
       color: var(--muted);
@@ -455,6 +503,9 @@
       <div class="detail-head">
         <div id="detail-title" class="detail-title">未选择进程</div>
         <button id="detail-copy-md5" class="secondary" disabled>复制 MD5</button>
+        <button id="detail-export-modules" class="secondary" disabled>导出模块</button>
+        <button id="detail-export-connections" class="secondary" disabled>导出连接</button>
+        <button id="detail-open-history" class="secondary" disabled>查历史通信</button>
         <button id="detail-refresh-connections" class="secondary" disabled>刷新连接</button>
         <button id="detail-open-path" class="secondary" disabled>打开位置</button>
       </div>
@@ -478,6 +529,9 @@
     const detailTitle = document.getElementById('detail-title');
     const detailBody = document.getElementById('detail-body');
     const detailCopyMD5 = document.getElementById('detail-copy-md5');
+    const detailExportModules = document.getElementById('detail-export-modules');
+    const detailExportConnections = document.getElementById('detail-export-connections');
+    const detailOpenHistory = document.getElementById('detail-open-history');
     const detailRefreshConnections = document.getElementById('detail-refresh-connections');
     const detailOpenPath = document.getElementById('detail-open-path');
     const tabBasic = document.getElementById('tab-basic');
@@ -596,6 +650,9 @@
       if (!p) {
         detailTitle.textContent = '未选择进程';
         detailCopyMD5.disabled = true;
+        detailExportModules.disabled = true;
+        detailExportConnections.disabled = true;
+        detailOpenHistory.disabled = true;
         detailRefreshConnections.disabled = true;
         detailOpenPath.disabled = true;
         detailBody.innerHTML = '<div class="empty">未选择进程</div>';
@@ -604,6 +661,9 @@
 
       detailTitle.innerHTML = `${escapeCell(p.name)} <span class="detail-meta">PID ${escapeCell(p.pid)} | ${escapeCell(p.path || p.pathError || '')}</span>`;
       detailCopyMD5.disabled = !p.md5;
+      detailExportModules.disabled = false;
+      detailExportConnections.disabled = false;
+      detailOpenHistory.disabled = false;
       detailRefreshConnections.disabled = false;
       detailOpenPath.disabled = !p.path;
       if (loading) {
@@ -691,6 +751,50 @@
       </section>`;
     }
 
+    function countBy(items, getter) {
+      const out = {};
+      items.forEach(item => {
+        const key = getter(item) || '未标记';
+        out[key] = (out[key] || 0) + 1;
+      });
+      return out;
+    }
+
+    function countTags(counts, className) {
+      return Object.entries(counts)
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+        .map(([name, count]) => `<span class="tag ${className || ''}">${escapeCell(name)} ${escapeCell(count)}</span>`)
+        .join('');
+    }
+
+    function moduleSummaryTags() {
+      const unsigned = selectedModules.filter(m => m.signature === '无签名请注意!!!').length;
+      const bad = selectedModules.filter(m => m.signature === '签名异常').length;
+      const signed = selectedModules.filter(m => m.signature === '已签名' || m.signature === '系统文件').length;
+      const hashErrors = selectedModules.filter(m => m.hashError).length;
+      return [
+        `<span class="tag info">模块 ${selectedModules.length}</span>`,
+        signed ? `<span class="tag ok">已签名/系统 ${signed}</span>` : '',
+        unsigned ? `<span class="tag warn">无签名 ${unsigned}</span>` : '',
+        bad ? `<span class="tag bad">签名异常 ${bad}</span>` : '',
+        hashErrors ? `<span class="tag warn">MD5 失败 ${hashErrors}</span>` : ''
+      ].filter(Boolean).join('');
+    }
+
+    function connectionSummaryTags() {
+      const external = selectedConnections.filter(c => c.remoteKind === '公网/外部').length;
+      const listen = selectedConnections.filter(c => c.state === 'LISTEN').length;
+      const established = selectedConnections.filter(c => c.state === 'ESTABLISHED').length;
+      const remoteKinds = countBy(selectedConnections, c => c.remoteKind || (c.remote ? '未分类' : '监听/无远程'));
+      return [
+        `<span class="tag info">连接 ${selectedConnections.length}</span>`,
+        external ? `<span class="tag warn">公网/外部 ${external}</span>` : '',
+        established ? `<span class="tag ok">ESTABLISHED ${established}</span>` : '',
+        listen ? `<span class="tag">LISTEN ${listen}</span>` : '',
+        countTags(remoteKinds)
+      ].filter(Boolean).join('');
+    }
+
     function renderEvidenceDetail() {
       if (evidenceError) {
         detailBody.innerHTML = `<div class="empty bad">${escapeCell(evidenceError)}</div>`;
@@ -753,12 +857,13 @@
           detailBody.innerHTML = '<div class="empty">没有模块数据</div>';
           return;
         }
-        detailBody.innerHTML = `<table class="detail-table">
+        detailBody.innerHTML = `<div class="summary-bar">${moduleSummaryTags()}</div><table class="detail-table">
           <thead>
             <tr>
               <th class="name">模块名</th>
               <th class="md5">MD5</th>
               <th class="signature">签名信息</th>
+              <th class="state">基址</th>
               <th class="size">大小 KB</th>
               <th class="actions">操作</th>
               <th class="path">模块路径</th>
@@ -772,6 +877,7 @@
                 <td class="name" title="${escapeCell(m.name)}">${escapeCell(m.name)}</td>
                 <td class="md5 ${m.md5 ? '' : 'warn'}" title="${escapeCell(hashText)}">${escapeCell(hashText)}</td>
                 <td class="signature">${renderSignature(m.signature, m.signatureMsg)}</td>
+                <td class="state" title="${escapeCell(m.baseAddress)}">${escapeCell(m.baseAddress)}</td>
                 <td class="size" title="${escapeCell(m.sizeKb)}">${escapeCell(m.sizeKb)}</td>
                 <td class="actions"><button class="mini" data-action="copy-module-md5" data-md5="${escapeCell(m.md5)}" ${copyDisabled}>复制</button></td>
                 <td class="path" title="${escapeCell(m.path)}">${escapeCell(m.path)}</td>
@@ -799,20 +905,26 @@
         detailBody.innerHTML = '<div class="empty">没有网络连接</div>';
         return;
       }
-      detailBody.innerHTML = `<table class="detail-table">
+      detailBody.innerHTML = `<div class="summary-bar">${connectionSummaryTags()}</div><table class="detail-table">
         <thead>
           <tr>
             <th class="signature">协议</th>
+            <th class="state">远程类型</th>
             <th class="endpoint">本地地址</th>
+            <th class="state">本地端口</th>
             <th class="endpoint">远程地址</th>
+            <th class="state">远程端口</th>
             <th class="state">状态</th>
           </tr>
         </thead>
         <tbody>
           ${selectedConnections.map(c => `<tr>
             <td class="signature">${escapeCell(c.protocol)}</td>
+            <td class="state" title="${escapeCell(c.remoteKind)}">${escapeCell(c.remoteKind)}</td>
             <td class="endpoint" title="${escapeCell(c.local)}">${escapeCell(c.local)}</td>
+            <td class="state" title="${escapeCell(c.localPort)}">${escapeCell(c.localPort || '')}</td>
             <td class="endpoint" title="${escapeCell(c.remote)}">${escapeCell(c.remote)}</td>
+            <td class="state" title="${escapeCell(c.remotePort)}">${escapeCell(c.remotePort || '')}</td>
             <td class="state" title="${escapeCell(c.state)}">${escapeCell(c.state)}</td>
           </tr>`).join('')}
         </tbody>
@@ -957,6 +1069,26 @@
       if (selectedPid != null) {
         openPath(selectedPid).catch(err => statusEl.textContent = err.message);
       }
+    });
+
+    detailExportModules.addEventListener('click', () => {
+      if (selectedPid == null) return;
+      statusEl.textContent = '正在导出模块列表...';
+      downloadCSV(`/api/process/${selectedPid}/modules.csv`);
+    });
+
+    detailExportConnections.addEventListener('click', () => {
+      if (selectedPid == null) return;
+      statusEl.textContent = '正在导出网络连接...';
+      downloadCSV(`/api/process/${selectedPid}/connections.csv`);
+    });
+
+    detailOpenHistory.addEventListener('click', () => {
+      const p = selectedProcess();
+      if (!p) return;
+      const params = new URLSearchParams({ category: 'all', q: String(p.pid) });
+      if (p.name) params.set('process', p.name);
+      window.location.href = `/history.html?${params.toString()}`;
     });
 
     detailRefreshConnections.addEventListener('click', () => {

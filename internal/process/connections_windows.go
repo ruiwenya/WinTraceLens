@@ -125,13 +125,7 @@ func tcp4Connections() ([]ConnectionInfo, error) {
 	items := make([]ConnectionInfo, 0, count)
 	for i := uint32(0); i < count; i++ {
 		row := (*mibTCPRowOwnerPID)(unsafe.Pointer(base + uintptr(i)*rowSize))
-		items = append(items, ConnectionInfo{
-			PID:      row.OwningPID,
-			Protocol: "TCP4",
-			Local:    endpoint4(row.LocalAddr, row.LocalPort),
-			Remote:   endpoint4(row.RemoteAddr, row.RemotePort),
-			State:    tcpState(row.State),
-		})
+		items = append(items, newConnectionInfo(row.OwningPID, "TCP4", ipv4(row.LocalAddr), networkPort(row.LocalPort), ipv4(row.RemoteAddr), networkPort(row.RemotePort), tcpState(row.State)))
 	}
 	return items, nil
 }
@@ -151,13 +145,7 @@ func tcp6Connections() ([]ConnectionInfo, error) {
 	items := make([]ConnectionInfo, 0, count)
 	for i := uint32(0); i < count; i++ {
 		row := (*mibTCP6RowOwnerPID)(unsafe.Pointer(base + uintptr(i)*rowSize))
-		items = append(items, ConnectionInfo{
-			PID:      row.OwningPID,
-			Protocol: "TCP6",
-			Local:    endpoint6(row.LocalAddr, row.LocalScopeID, row.LocalPort),
-			Remote:   endpoint6(row.RemoteAddr, row.RemoteScopeID, row.RemotePort),
-			State:    tcpState(row.State),
-		})
+		items = append(items, newConnectionInfo(row.OwningPID, "TCP6", ipv6(row.LocalAddr, row.LocalScopeID), networkPort(row.LocalPort), ipv6(row.RemoteAddr, row.RemoteScopeID), networkPort(row.RemotePort), tcpState(row.State)))
 	}
 	return items, nil
 }
@@ -177,13 +165,7 @@ func udp4Connections() ([]ConnectionInfo, error) {
 	items := make([]ConnectionInfo, 0, count)
 	for i := uint32(0); i < count; i++ {
 		row := (*mibUDPRowOwnerPID)(unsafe.Pointer(base + uintptr(i)*rowSize))
-		items = append(items, ConnectionInfo{
-			PID:      row.OwningPID,
-			Protocol: "UDP4",
-			Local:    endpoint4(row.LocalAddr, row.LocalPort),
-			Remote:   "",
-			State:    "",
-		})
+		items = append(items, newConnectionInfo(row.OwningPID, "UDP4", ipv4(row.LocalAddr), networkPort(row.LocalPort), "", 0, ""))
 	}
 	return items, nil
 }
@@ -203,13 +185,7 @@ func udp6Connections() ([]ConnectionInfo, error) {
 	items := make([]ConnectionInfo, 0, count)
 	for i := uint32(0); i < count; i++ {
 		row := (*mibUDP6RowOwnerPID)(unsafe.Pointer(base + uintptr(i)*rowSize))
-		items = append(items, ConnectionInfo{
-			PID:      row.OwningPID,
-			Protocol: "UDP6",
-			Local:    endpoint6(row.LocalAddr, row.LocalScopeID, row.LocalPort),
-			Remote:   "",
-			State:    "",
-		})
+		items = append(items, newConnectionInfo(row.OwningPID, "UDP6", ipv6(row.LocalAddr, row.LocalScopeID), networkPort(row.LocalPort), "", 0, ""))
 	}
 	return items, nil
 }
@@ -260,6 +236,78 @@ func endpoint6(addr [16]byte, scope uint32, port uint32) string {
 
 func ipv4(addr uint32) string {
 	return net.IPv4(byte(addr), byte(addr>>8), byte(addr>>16), byte(addr>>24)).String()
+}
+
+func ipv6(addr [16]byte, scope uint32) string {
+	ip := net.IP(addr[:]).String()
+	if scope != 0 {
+		ip = fmt.Sprintf("%s%%%d", ip, scope)
+	}
+	return ip
+}
+
+func newConnectionInfo(pid uint32, protocol, localIP string, localPort uint16, remoteIP string, remotePort uint16, state string) ConnectionInfo {
+	return ConnectionInfo{
+		PID:        pid,
+		Protocol:   protocol,
+		Local:      formatEndpoint(localIP, localPort),
+		LocalIP:    localIP,
+		LocalPort:  localPort,
+		Remote:     formatEndpoint(remoteIP, remotePort),
+		RemoteIP:   remoteIP,
+		RemotePort: remotePort,
+		RemoteKind: remoteKind(remoteIP),
+		State:      state,
+	}
+}
+
+func formatEndpoint(ip string, port uint16) string {
+	if strings.TrimSpace(ip) == "" {
+		return ""
+	}
+	host := ip
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	if port == 0 {
+		return host
+	}
+	return fmt.Sprintf("%s:%d", host, port)
+}
+
+func remoteKind(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	scope := ""
+	if idx := strings.LastIndex(value, "%"); idx >= 0 {
+		scope = value[idx+1:]
+		value = value[:idx]
+	}
+	ip := net.ParseIP(value)
+	if ip == nil {
+		return ""
+	}
+	if ip.IsUnspecified() {
+		return "未连接"
+	}
+	if ip.IsLoopback() {
+		return "本机"
+	}
+	if ip.IsPrivate() {
+		return "内网"
+	}
+	if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || scope != "" {
+		return "链路本地"
+	}
+	if ip.IsMulticast() {
+		return "组播"
+	}
+	if ip.Equal(net.IPv4(255, 255, 255, 255)) {
+		return "广播"
+	}
+	return "公网/外部"
 }
 
 func networkPort(port uint32) uint16 {
