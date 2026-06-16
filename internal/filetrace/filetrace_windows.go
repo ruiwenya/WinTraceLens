@@ -249,7 +249,7 @@ try {
       Add-Record '最近运行文件' 'Prefetch' $_ $_.FullName $_.LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss') '' '' '' ('可执行名=' + $exe)
     }
   } else {
-    Add-Error 'Prefetch' ('not found: ' + $pfRoot)
+    Add-Error '最近运行文件' ('Prefetch 目录不存在或未启用，无法读取最近运行记录，不影响最近修改文件和 Temp 目录扫描: ' + $pfRoot)
   }
 } catch {
   Add-Error 'Prefetch' $_.Exception.Message

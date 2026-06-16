@@ -47,7 +47,7 @@
     }
     main {
       display: grid;
-      grid-template-rows: auto auto minmax(0, 1fr);
+      grid-template-rows: auto auto auto minmax(0, 1fr);
       gap: 10px;
       height: calc(100vh - 48px);
       padding: 12px;
@@ -57,6 +57,27 @@
       align-items: center;
       gap: 8px;
       flex-wrap: wrap;
+    }
+    .system-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      min-height: 38px;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+    }
+    .tool-label {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 650;
+    }
+    .tool-hint {
+      margin-left: auto;
+      color: var(--muted);
+      font-size: 13px;
     }
     input {
       width: min(600px, 100%);
@@ -197,6 +218,15 @@
       <input id="filter" placeholder="按名称、路径、命令、MD5、签名、账户过滤">
       <span id="status" class="status">尚未加载</span>
     </div>
+    <div class="system-toolbar" aria-label="系统界面对比">
+      <span class="tool-label">系统界面对比</span>
+      <button class="secondary system-tool" data-tool="services">服务管理器</button>
+      <button class="secondary system-tool" data-tool="tasks">任务计划程序</button>
+      <button class="secondary system-tool" data-tool="startup">系统配置启动项</button>
+      <button class="secondary system-tool" data-tool="users">本地用户和组</button>
+      <button class="secondary system-tool" data-tool="registry">注册表</button>
+      <span id="system-tool-status" class="tool-hint">用于和采集结果快速对比</span>
+    </div>
     <div class="tabs">
       <button class="tab active" data-tab="services">服务</button>
       <button class="tab" data-tab="tasks">计划任务</button>
@@ -216,6 +246,7 @@
     const filter = document.getElementById('filter');
     const statusEl = document.getElementById('status');
     const exportCSV = document.getElementById('export-csv');
+    const systemToolStatus = document.getElementById('system-tool-status');
     let snapshot = null;
     let activeTab = 'services';
 
@@ -361,6 +392,18 @@
       return params.toString();
     }
 
+    async function openSystemTool(tool) {
+      systemToolStatus.textContent = '正在打开系统界面...';
+      const res = await fetch('/api/system/open', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tool })
+      });
+      if (!res.ok) throw new Error(await res.text() || res.statusText);
+      const data = await res.json();
+      systemToolStatus.textContent = data.message || '已请求打开系统界面';
+    }
+
     async function load() {
       statusEl.textContent = '正在采集主机信息...';
       exportCSV.disabled = true;
@@ -390,6 +433,13 @@
       btn.addEventListener('click', () => {
         activeTab = btn.dataset.tab;
         render();
+      });
+    });
+    document.querySelectorAll('button.system-tool').forEach(btn => {
+      btn.addEventListener('click', () => {
+        openSystemTool(btn.dataset.tool).catch(err => {
+          systemToolStatus.textContent = err.message.trim() || '系统界面打开失败';
+        });
       });
     });
     load().catch(err => {

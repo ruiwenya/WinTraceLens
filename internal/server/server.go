@@ -24,6 +24,7 @@ import (
 	"github.com/ruiwenya/WinTraceLens/internal/process"
 	"github.com/ruiwenya/WinTraceLens/internal/runtimeinfo"
 	"github.com/ruiwenya/WinTraceLens/internal/securitylog"
+	"github.com/ruiwenya/WinTraceLens/internal/systemtools"
 	"github.com/ruiwenya/WinTraceLens/internal/threatanalysis"
 	"github.com/ruiwenya/WinTraceLens/internal/yaraengine"
 )
@@ -76,6 +77,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/ai/analyze", s.handleAIAnalyze)
 	mux.HandleFunc("/api/ai/session", s.handleAISession)
 	mux.HandleFunc("/api/dialog/folder", s.handleDialogFolder)
+	mux.HandleFunc("/api/system/open", s.handleSystemOpen)
 	mux.HandleFunc("/api/about", s.handleAbout)
 	uiRoot, err := fs.Sub(uiFiles, "ui")
 	if err != nil {
@@ -720,6 +722,30 @@ func (s *Server) handleDialogFolder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, dialog.SelectFolder(r.URL.Query().Get("title")))
+}
+
+func (s *Server) handleSystemOpen(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Tool string `json:"tool"`
+	}
+	if err := readJSONBody(w, r, &req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	tool, err := systemtools.Open(req.Tool)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, struct {
+		OK      bool             `json:"ok"`
+		Tool    systemtools.Tool `json:"tool"`
+		Message string           `json:"message"`
+	}{OK: true, Tool: tool, Message: "已请求打开系统界面：" + tool.Label})
 }
 
 func (s *Server) collectFindings() ([]analysis.Finding, string, error) {
