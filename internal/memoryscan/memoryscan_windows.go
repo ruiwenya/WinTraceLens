@@ -250,6 +250,7 @@ func inspectProcess(item process.Info, opts Options) (bool, bool, []Record, []st
 	if walked >= maxAddressWalkRegions {
 		errors = append(errors, fmt.Sprintf("PID %d %s: 内存区域过多，已停止枚举", item.PID, item.Name))
 	}
+	records = compactExpectedMemoryRecords(records)
 
 	if opts.IncludeThreads && len(records) < opts.MaxRegionsPerProcess {
 		modules, err := processModules(item.PID)
@@ -261,6 +262,38 @@ func inspectProcess(item process.Info, opts Options) (bool, bool, []Record, []st
 	}
 
 	return true, false, records, errors
+}
+
+func compactExpectedMemoryRecords(records []Record) []Record {
+	if len(records) < 2 {
+		return records
+	}
+	compacted := make([]Record, 0, len(records))
+	seen := make(map[string]struct{})
+	representatives := 0
+	firstExpected := -1
+	suppressed := 0
+	for _, record := range records {
+		if record.Context == "" || record.Level != "低" || record.Category == "线程入口" {
+			compacted = append(compacted, record)
+			continue
+		}
+		key := strings.Join([]string{record.Context, record.Category, record.Reason, record.Protect, record.MemoryType}, "\x00")
+		if _, ok := seen[key]; ok || representatives >= 3 {
+			suppressed++
+			continue
+		}
+		seen[key] = struct{}{}
+		representatives++
+		compacted = append(compacted, record)
+		if firstExpected < 0 {
+			firstExpected = len(compacted) - 1
+		}
+	}
+	if suppressed > 0 && firstExpected >= 0 {
+		compacted[firstExpected].Details = appendDetail(compacted[firstExpected].Details, fmt.Sprintf("同进程同类低风险记录已合并，省略 %d 条", suppressed))
+	}
+	return compacted
 }
 
 func appendRecords(existing, incoming []Record, max int) []Record {
@@ -535,8 +568,12 @@ func expectedMemoryContext(item process.Info) string {
 	lowerName := strings.TrimSuffix(strings.ToLower(item.Name), ".exe")
 	lowerPath := strings.ToLower(strings.ReplaceAll(item.Path, "/", `\`))
 	parentName := strings.TrimSuffix(strings.ToLower(item.ParentName), ".exe")
-	if isPowerShellName(lowerName) && selfidentity.IsScannerProcessName(parentName) {
+	trusted := isTrustedMemoryContextProcess(item)
+	if isPowerShellName(lowerName) && selfidentity.IsScannerProcessName(parentName) && trusted {
 		return "本工具采集 PowerShell 子进程"
+	}
+	if !trusted {
+		return ""
 	}
 	if isPowerShellName(lowerName) {
 		return "PowerShell/.NET 运行时动态内存行为"
@@ -544,16 +581,43 @@ func expectedMemoryContext(item process.Info) string {
 	if lowerName == "explorer" && isWindowsExplorerPath(lowerPath) {
 		return "Windows Shell/右键菜单扩展/输入法/安全软件 Hook 常见内存行为"
 	}
+	if isExpectedWindowsRuntimeName(lowerName) {
+		return "Windows 组件/WinUI/.NET 常见动态内存行为"
+	}
 	if hasAny(lowerName, lowerPath, []string{"chrome", "msedge", "firefox", "browser", "wechat", "weixin", "wxwork", "qq", "tim", "teams", "slack", "discord"}) {
 		return "常见浏览器/聊天客户端动态内存行为"
 	}
-	if hasAny(lowerName, lowerPath, []string{"code", "codex", "cursor", "node", "electron", "extension-host", "python", "go", "java"}) {
+	if hasAny(lowerName, lowerPath, []string{"chatgpt", "openai"}) {
+		return "OpenAI 客户端/Electron 常见动态内存行为"
+	}
+	if hasAny(lowerName, lowerPath, []string{"utools", "code", "codex", "cursor", "node", "electron", "extension-host", "python", "go", "java"}) {
 		return "常见开发工具或运行时动态内存行为"
 	}
 	if hasAny(lowerName, lowerPath, []string{"huorong", "hips", "hr", "火绒", "360", "defender", "security", "avp", "edr", "xdr"}) {
 		return "安全软件 Hook/防护模块常见内存行为"
 	}
 	return ""
+}
+
+func isTrustedMemoryContextProcess(item process.Info) bool {
+	if item.Signature == "系统文件" || item.Signature == "已签名" {
+		return true
+	}
+	name := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(item.Name)), ".exe")
+	path := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(item.Path), "/", `\`))
+	return (name == "chatgpt" || name == "codex") && strings.Contains(path, `\program files\windowsapps\openai.`)
+}
+
+func isExpectedWindowsRuntimeName(name string) bool {
+	switch name {
+	case "runtimebroker", "lockapp", "searchhost", "searchapp",
+		"shellexperiencehost", "startmenuexperiencehost", "textinputhost",
+		"phoneexperiencehost", "crossdeviceservice", "applicationframehost",
+		"widgetboard", "widgets", "systemsettings", "securityhealthhost":
+		return true
+	default:
+		return false
+	}
 }
 
 func isPowerShellName(name string) bool {
@@ -566,6 +630,12 @@ func isWindowsExplorerPath(path string) bool {
 
 func hasAny(name, path string, values []string) bool {
 	for _, value := range values {
+		if len(value) <= 3 {
+			if name == value || strings.HasPrefix(name, value+"-") || strings.HasPrefix(name, value+"_") || (value == "360" && strings.HasPrefix(name, value)) {
+				return true
+			}
+			continue
+		}
 		if strings.Contains(name, value) || strings.Contains(path, value) {
 			return true
 		}

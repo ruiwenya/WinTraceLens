@@ -31,6 +31,13 @@
 - YARA 扫描：调用本机外部 `yara.exe` / `yara64.exe`，支持选择规则目录并批量检测规则错误、选择文件夹扫描、补充单文件路径扫描、列出进程并默认全选或部分勾选做进程内存扫描、超时、并发限制，并把命中结果关联到 PID、进程名和路径。
 - CSV 导出：进程、主机信息、关注项、威胁分析、文件痕迹、历史通信、事件日志均支持导出。
 
+## 检测边界
+
+- Toolhelp32 与 `NtQuerySystemInformation(SystemProcessInformation)` 是两个用户态进程视图，适合发现进程创建/退出竞态、API 视图差异及连接表残留 PID，但不能据此证明不存在 DKOM 隐藏进程。
+- `Win32_Process` 属于 WMI CIMWin32 Provider，其多个字段映射到 `SYSTEM_PROCESS_INFORMATION`，因此不作为独立的 DKOM 检测源。
+- 对抗内核链表摘除仍需要可信的只读内核采集驱动、内存镜像交叉视图分析或离线取证；当前 1.0 基础版不包含这类内核能力。
+- 内部 HTTP 服务只接受回环 Host，并使用随机引导令牌、HttpOnly 会话 Cookie、API Header 令牌和浏览器同源信息共同限制访问。`Origin` 为空时仍以随机令牌作为主要认证边界。
+
 ## Windows 兼容性说明
 
 GUI 版依赖 Microsoft Edge WebView2 Runtime。Windows 10/11 和较新的 Windows Server 通常已自带或可通过 Edge/WebView2 Runtime 安装获得。

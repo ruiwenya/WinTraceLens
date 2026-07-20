@@ -198,7 +198,7 @@ if (Test-Path $ifeoRoot) {
 } | ConvertTo-Json -Compress -Depth 5
 `
 
-	cmd := winexec.Command("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script)
+	cmd := winexec.PowerShell(script)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
@@ -359,7 +359,7 @@ $schedule = New-Object -ComObject Schedule.Service
 $schedule.Connect()
 @((Walk-Folder ($schedule.GetFolder('\')))) | ConvertTo-Json -Compress -Depth 4
 `
-	cmd := winexec.Command("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script)
+	cmd := winexec.PowerShell(script)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
@@ -394,7 +394,7 @@ $tasks = schtasks.exe /query /fo csv /v | ConvertFrom-Csv | Where-Object { $_.Ta
 }
 @($tasks) | ConvertTo-Json -Compress -Depth 4
 `
-	cmd := winexec.Command("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script)
+	cmd := winexec.PowerShell(script)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()

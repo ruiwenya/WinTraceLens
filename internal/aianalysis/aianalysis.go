@@ -12,9 +12,11 @@ import (
 	"time"
 
 	"github.com/ruiwenya/WinTraceLens/internal/analysis"
+	"github.com/ruiwenya/WinTraceLens/internal/driveranalysis"
 	"github.com/ruiwenya/WinTraceLens/internal/filetrace"
 	"github.com/ruiwenya/WinTraceLens/internal/history"
 	"github.com/ruiwenya/WinTraceLens/internal/host"
+	"github.com/ruiwenya/WinTraceLens/internal/investigation"
 	"github.com/ruiwenya/WinTraceLens/internal/loghealth"
 	"github.com/ruiwenya/WinTraceLens/internal/memoryscan"
 	"github.com/ruiwenya/WinTraceLens/internal/process"
@@ -24,14 +26,17 @@ import (
 
 const (
 	sectionProcesses = "processes"
+	sectionRisk      = "risk"
 	sectionFindings  = "findings"
 	sectionBehavior  = "behavior"
+	sectionDrivers   = "drivers"
 	sectionMemory    = "memory"
 	sectionHost      = "host"
 	sectionFileTrace = "filetrace"
 	sectionHistory   = "history"
 	sectionSecurity  = "security"
 	sectionLogHealth = "loghealth"
+	sectionCase      = "investigation"
 
 	defaultMaxItems       = 80
 	maxItemsUpperBound    = 300
@@ -41,6 +46,19 @@ const (
 
 type Options struct {
 	HashLimitBytes int64
+	Evidence       EvidenceProvider
+}
+
+type EvidenceProvider interface {
+	Processes(process.Options, bool) ([]process.Info, error)
+	Connections(bool) ([]process.ConnectionInfo, error)
+	Host(host.Options, bool) (host.Snapshot, error)
+	FileTraces(filetrace.Options, bool) (filetrace.Snapshot, error)
+	History(history.Options, bool) (history.Snapshot, error)
+	Security(securitylog.Options, bool) (securitylog.Snapshot, error)
+	Drivers(driveranalysis.Options, bool) (driveranalysis.Snapshot, error)
+	Memory(memoryscan.Options, bool) (memoryscan.Snapshot, error)
+	LogHealth(bool) (loghealth.Snapshot, error)
 }
 
 type AnalyzeRequest struct {
@@ -54,6 +72,23 @@ type AnalyzeRequest struct {
 	IncludeEvidence bool      `json:"includeEvidence"`
 	MaxItems        int       `json:"maxItems"`
 	TimeoutSeconds  int       `json:"timeoutSeconds"`
+	RedactionMode   string    `json:"redactionMode"`
+	PreviewID       string    `json:"previewId,omitempty"`
+}
+
+type PreviewResponse struct {
+	PreviewID        string           `json:"previewId"`
+	Content          string           `json:"content"`
+	Sections         []SectionSummary `json:"sections"`
+	CollectionErrors []string         `json:"collectionErrors"`
+	PromptBytes      int              `json:"promptBytes"`
+	RedactionMode    string           `json:"redactionMode"`
+	GeneratedAt      string           `json:"generatedAt"`
+}
+
+type PreparedAnalysis struct {
+	userPrompt string
+	sections   []evidenceSection
 }
 
 type AnalyzeResponse struct {
@@ -69,23 +104,25 @@ type AnalyzeResponse struct {
 }
 
 type SessionState struct {
-	Messages  []Message         `json:"messages"`
-	Summary   AnalyzeResponse   `json:"summary"`
-	Settings  SessionSettings   `json:"settings"`
-	APIKeys   map[string]string `json:"apiKeys,omitempty"`
-	Status    string            `json:"status"`
-	UpdatedAt string            `json:"updatedAt"`
+	Messages     []Message         `json:"messages"`
+	Summary      AnalyzeResponse   `json:"summary"`
+	Settings     SessionSettings   `json:"settings"`
+	APIKeys      map[string]string `json:"apiKeys,omitempty"`
+	SavedAPIKeys map[string]bool   `json:"savedApiKeys,omitempty"`
+	Status       string            `json:"status"`
+	UpdatedAt    string            `json:"updatedAt"`
 }
 
 type SessionSettings struct {
-	Provider    string   `json:"provider"`
-	Model       string   `json:"model"`
-	CustomModel string   `json:"customModel"`
-	BaseURL     string   `json:"baseUrl"`
-	Sections    []string `json:"sections"`
-	Question    string   `json:"question"`
-	MaxItems    int      `json:"maxItems"`
-	Timeout     int      `json:"timeout"`
+	Provider      string   `json:"provider"`
+	Model         string   `json:"model"`
+	CustomModel   string   `json:"customModel"`
+	BaseURL       string   `json:"baseUrl"`
+	Sections      []string `json:"sections"`
+	Question      string   `json:"question"`
+	MaxItems      int      `json:"maxItems"`
+	Timeout       int      `json:"timeout"`
+	RedactionMode string   `json:"redactionMode"`
 }
 
 type SectionSummary struct {
@@ -230,17 +267,18 @@ func Analyze(ctx context.Context, req AnalyzeRequest, opts Options) (AnalyzeResp
 			}
 			messages = append([]chatMessage{{Role: "user", Content: prompt}}, messages...)
 		}
+		if normalizeRedactionMode(req.RedactionMode) == "basic" {
+			for i := range messages {
+				messages[i].Content = redactSensitiveText(messages[i].Content)
+			}
+		}
 		promptBytes = messagesBytes(messages)
 	} else {
-		req.Sections = normalizeSections(req.Sections)
-		evidence = collectEvidence(req.Sections, req.MaxItems, opts)
-		sections = evidence.Sections
-		userPrompt, err := userPrompt(req.Question, evidence)
+		prepared, _, err := Prepare(req, opts)
 		if err != nil {
-			return AnalyzeResponse{}, fmt.Errorf("构建 AI 分析数据失败: %w", err)
+			return AnalyzeResponse{}, err
 		}
-		messages = []chatMessage{{Role: "user", Content: userPrompt}}
-		promptBytes = len([]byte(userPrompt))
+		return AnalyzePrepared(ctx, req, prepared)
 	}
 	systemPrompt := systemPrompt()
 	apiMessages := append([]chatMessage{{Role: "system", Content: systemPrompt}}, messages...)
@@ -263,6 +301,85 @@ func Analyze(ctx context.Context, req AnalyzeRequest, opts Options) (AnalyzeResp
 		PromptBytes:      promptBytes,
 		GeneratedAt:      time.Now().Format("2006-01-02 15:04:05"),
 	}, nil
+}
+
+func Prepare(req AnalyzeRequest, opts Options) (PreparedAnalysis, PreviewResponse, error) {
+	req.Sections = normalizeSections(req.Sections)
+	req.MaxItems = normalizeMaxItems(req.MaxItems)
+	evidence := collectEvidence(req.Sections, req.MaxItems, opts)
+	prompt, err := userPrompt(req.Question, evidence)
+	if err != nil {
+		return PreparedAnalysis{}, PreviewResponse{}, fmt.Errorf("构建 AI 分析数据失败: %w", err)
+	}
+	mode := normalizeRedactionMode(req.RedactionMode)
+	if mode == "basic" {
+		prompt = redactSensitiveText(prompt)
+	}
+	prepared := PreparedAnalysis{
+		userPrompt: prompt,
+		sections:   evidence.Sections,
+	}
+	preview := PreviewResponse{
+		Content:          "SYSTEM:\n" + systemPrompt() + "\n\nUSER:\n" + prompt,
+		Sections:         sectionSummaries(evidence.Sections),
+		CollectionErrors: collectionErrors(evidence.Sections),
+		PromptBytes:      len([]byte(prompt)),
+		RedactionMode:    mode,
+		GeneratedAt:      time.Now().Format("2006-01-02 15:04:05"),
+	}
+	return prepared, preview, nil
+}
+
+func AnalyzePrepared(ctx context.Context, req AnalyzeRequest, prepared PreparedAnalysis) (AnalyzeResponse, error) {
+	cfg, err := resolveProvider(req.Provider)
+	if err != nil {
+		return AnalyzeResponse{}, err
+	}
+	req.APIKey = strings.TrimSpace(req.APIKey)
+	if req.APIKey == "" {
+		return AnalyzeResponse{}, ValidationError{Message: "API Key 不能为空"}
+	}
+	model := strings.TrimSpace(req.Model)
+	if model == "" {
+		model = cfg.defaultModel
+	}
+	baseURL := strings.TrimSpace(req.BaseURL)
+	if baseURL == "" {
+		baseURL = cfg.baseURL
+	}
+	endpoint, err := chatEndpoint(baseURL)
+	if err != nil {
+		return AnalyzeResponse{}, err
+	}
+	req.TimeoutSeconds = normalizeTimeout(req.TimeoutSeconds)
+	apiMessages := []chatMessage{
+		{Role: "system", Content: systemPrompt()},
+		{Role: "user", Content: prepared.userPrompt},
+	}
+	callCtx, cancel := context.WithTimeout(ctx, time.Duration(req.TimeoutSeconds)*time.Second)
+	defer cancel()
+	answer, usage, err := callChatCompletion(callCtx, endpoint, req.APIKey, model, apiMessages)
+	if err != nil {
+		return AnalyzeResponse{}, err
+	}
+	return AnalyzeResponse{
+		Provider:         cfg.displayName,
+		Model:            model,
+		Endpoint:         endpoint,
+		Answer:           answer,
+		Sections:         sectionSummaries(prepared.sections),
+		CollectionErrors: collectionErrors(prepared.sections),
+		Usage:            usage,
+		PromptBytes:      len([]byte(prepared.userPrompt)),
+		GeneratedAt:      time.Now().Format("2006-01-02 15:04:05"),
+	}, nil
+}
+
+func normalizeRedactionMode(value string) string {
+	if strings.EqualFold(strings.TrimSpace(value), "none") {
+		return "none"
+	}
+	return "basic"
 }
 
 func resolveProvider(provider string) (providerConfig, error) {
@@ -319,23 +436,29 @@ func chatEndpoint(baseURL string) (string, error) {
 
 func normalizeSections(values []string) []string {
 	if len(values) == 0 {
-		values = []string{sectionProcesses, sectionFindings, sectionBehavior, sectionLogHealth}
+		values = []string{sectionProcesses, sectionRisk, sectionDrivers, sectionSecurity}
 	}
 	allowed := map[string]struct{}{
 		sectionProcesses: {},
-		sectionFindings:  {},
-		sectionBehavior:  {},
+		sectionRisk:      {},
+		sectionDrivers:   {},
 		sectionMemory:    {},
 		sectionHost:      {},
 		sectionFileTrace: {},
 		sectionHistory:   {},
 		sectionSecurity:  {},
-		sectionLogHealth: {},
+		sectionCase:      {},
 	}
 	seen := make(map[string]struct{})
 	out := make([]string, 0, len(values))
 	for _, value := range values {
 		key := strings.ToLower(strings.TrimSpace(value))
+		switch key {
+		case sectionFindings, sectionBehavior:
+			key = sectionRisk
+		case sectionLogHealth:
+			key = sectionSecurity
+		}
 		if _, ok := allowed[key]; !ok {
 			continue
 		}
@@ -346,7 +469,7 @@ func normalizeSections(values []string) []string {
 		out = append(out, key)
 	}
 	if len(out) == 0 {
-		return []string{sectionProcesses, sectionFindings, sectionBehavior, sectionLogHealth}
+		return []string{sectionProcesses, sectionRisk, sectionDrivers, sectionSecurity}
 	}
 	return out
 }
@@ -376,6 +499,7 @@ func NormalizeSessionState(state SessionState) SessionState {
 	state.Summary.Answer = ""
 	state.Summary.Endpoint = trimText(state.Summary.Endpoint, 500)
 	state.APIKeys = normalizeAPIKeys(state.APIKeys)
+	state.SavedAPIKeys = nil
 	state.Status = trimText(state.Status, 80)
 	state.Settings.Provider = trimText(state.Settings.Provider, 40)
 	state.Settings.Model = trimText(state.Settings.Model, 120)
@@ -385,6 +509,7 @@ func NormalizeSessionState(state SessionState) SessionState {
 	state.Settings.Question = trimText(state.Settings.Question, 4000)
 	state.Settings.MaxItems = normalizeMaxItems(state.Settings.MaxItems)
 	state.Settings.Timeout = normalizeTimeout(state.Settings.Timeout)
+	state.Settings.RedactionMode = normalizeRedactionMode(state.Settings.RedactionMode)
 	state.UpdatedAt = time.Now().Format("2006-01-02 15:04:05")
 	return state
 }
@@ -477,33 +602,70 @@ func collectSection(section string, maxItems int, opts Options) evidenceSection 
 	switch section {
 	case sectionProcesses:
 		return collectProcesses(maxItems, opts)
+	case sectionRisk:
+		return collectRisk(maxItems, opts)
 	case sectionFindings:
 		return collectFindings(maxItems, opts)
 	case sectionBehavior:
 		return collectBehavior(maxItems, opts)
+	case sectionDrivers:
+		return collectDrivers(maxItems, opts)
 	case sectionMemory:
-		return collectMemory(maxItems)
+		return collectMemory(maxItems, opts)
 	case sectionHost:
 		return collectHost(maxItems, opts)
 	case sectionFileTrace:
-		return collectFileTrace(maxItems)
+		return collectFileTrace(maxItems, opts)
 	case sectionHistory:
-		return collectHistory(maxItems)
+		return collectHistory(maxItems, opts)
 	case sectionSecurity:
-		return collectSecurity(maxItems)
+		return collectSecurity(maxItems, opts)
 	case sectionLogHealth:
-		return collectLogHealth(maxItems)
+		return collectLogHealth(maxItems, opts)
+	case sectionCase:
+		return collectInvestigation(maxItems, opts)
 	default:
 		return evidenceSection{Key: section, Label: section, CollectionErrors: []string{"未知模块"}, Items: []any{}}
 	}
 }
 
+func collectRisk(maxItems int, opts Options) evidenceSection {
+	rules := collectFindings(maxItems, opts)
+	behavior := collectBehavior(maxItems, opts)
+	errors := append([]string(nil), rules.CollectionErrors...)
+	errors = append(errors, behavior.CollectionErrors...)
+	return evidenceSection{
+		Key:              sectionRisk,
+		Label:            "风险线索",
+		Count:            rules.Count + behavior.Count,
+		Note:             fmt.Sprintf("规则关注项 %d，行为关联 %d；两类结果共用同一批进程与主机证据", rules.Count, behavior.Count),
+		CollectionErrors: errors,
+		Items: map[string]any{
+			"rules":    rules.Items,
+			"behavior": behavior.Items,
+		},
+	}
+}
+
 func collectProcesses(maxItems int, opts Options) evidenceSection {
-	items, err := process.Collect(process.Options{HashLimitBytes: opts.HashLimitBytes})
+	processOpts := process.Options{HashLimitBytes: opts.HashLimitBytes}
+	var items []process.Info
+	var err error
+	if opts.Evidence != nil {
+		items, err = opts.Evidence.Processes(processOpts, false)
+	} else {
+		items, err = process.Collect(processOpts)
+	}
 	if err != nil {
 		return sectionError(sectionProcesses, "进程信息", err)
 	}
-	connections, connErr := process.CollectConnections()
+	var connections []process.ConnectionInfo
+	var connErr error
+	if opts.Evidence != nil {
+		connections, connErr = opts.Evidence.Connections(false)
+	} else {
+		connections, connErr = process.CollectConnections()
+	}
 	connectionsByPID := buildConnectionsByPID(connections)
 	sort.SliceStable(items, func(i, j int) bool {
 		if processScore(items[i]) != processScore(items[j]) {
@@ -520,7 +682,7 @@ func collectProcesses(maxItems int, opts Options) evidenceSection {
 		Key:              sectionProcesses,
 		Label:            "进程信息",
 		Count:            len(items),
-		Note:             fmt.Sprintf("按连接数、签名、路径和错误信息排序后截取；实时连接 %d 条，连接明细为当前快照，不代表历史通信", len(connections)),
+		Note:             fmt.Sprintf("按连接数、签名、路径和错误信息排序后截取；实时连接 %d 条，连接明细为当前快照，不代表历史通信；Toolhelp32 与 NT 系统信息仅用于发现用户态视图差异，不能证明不存在 DKOM 隐藏进程", len(connections)),
 		CollectionErrors: collectionErrors,
 		Items: map[string]any{
 			"processes":       limitedProcesses,
@@ -531,11 +693,24 @@ func collectProcesses(maxItems int, opts Options) evidenceSection {
 }
 
 func collectFindings(maxItems int, opts Options) evidenceSection {
-	processes, err := process.Collect(process.Options{HashLimitBytes: opts.HashLimitBytes})
+	processOpts := process.Options{HashLimitBytes: opts.HashLimitBytes}
+	var processes []process.Info
+	var err error
+	if opts.Evidence != nil {
+		processes, err = opts.Evidence.Processes(processOpts, false)
+	} else {
+		processes, err = process.Collect(processOpts)
+	}
 	if err != nil {
 		return sectionError(sectionFindings, "关注项", err)
 	}
-	hostSnapshot, err := host.Collect(host.Options{HashLimitBytes: opts.HashLimitBytes})
+	hostOpts := host.Options{HashLimitBytes: opts.HashLimitBytes}
+	var hostSnapshot host.Snapshot
+	if opts.Evidence != nil {
+		hostSnapshot, err = opts.Evidence.Host(hostOpts, false)
+	} else {
+		hostSnapshot, err = host.Collect(hostOpts)
+	}
 	if err != nil {
 		return sectionError(sectionFindings, "关注项", err)
 	}
@@ -549,12 +724,35 @@ func collectFindings(maxItems int, opts Options) evidenceSection {
 }
 
 func collectBehavior(maxItems int, opts Options) evidenceSection {
-	snapshot, err := threatanalysis.Collect(threatanalysis.Options{
+	behaviorOpts := threatanalysis.Options{
 		HashLimitBytes:   opts.HashLimitBytes,
 		MaxRecords:       maxItems,
-		IncludeMemory:    false,
+		IncludeMemory:    true,
 		IncludeFileTrace: false,
-	})
+	}
+	var snapshot threatanalysis.Snapshot
+	var err error
+	if opts.Evidence == nil {
+		snapshot, err = threatanalysis.Collect(behaviorOpts)
+	} else {
+		var sources threatanalysis.Sources
+		sources.Processes, err = opts.Evidence.Processes(process.Options{HashLimitBytes: opts.HashLimitBytes}, false)
+		if err == nil {
+			var hostErr error
+			sources.Host, hostErr = opts.Evidence.Host(host.Options{HashLimitBytes: opts.HashLimitBytes}, false)
+			if hostErr != nil {
+				sources.CollectionErrors = append(sources.CollectionErrors, "主机持久化采集失败: "+hostErr.Error())
+			}
+			var memoryErr error
+			sources.Memory, memoryErr = opts.Evidence.Memory(aiMemoryOptions(maxItems), false)
+			if memoryErr != nil {
+				sources.CollectionErrors = append(sources.CollectionErrors, "内存异常采集失败: "+memoryErr.Error())
+			} else {
+				sources.CollectionErrors = append(sources.CollectionErrors, sources.Memory.CollectionErrors...)
+			}
+			snapshot = threatanalysis.Build(behaviorOpts, sources)
+		}
+	}
 	if err != nil {
 		return sectionError(sectionBehavior, "行为关联", err)
 	}
@@ -568,13 +766,40 @@ func collectBehavior(maxItems int, opts Options) evidenceSection {
 	}
 }
 
-func collectMemory(maxItems int) evidenceSection {
-	snapshot, err := memoryscan.Collect(memoryscan.Options{
-		MaxProcesses:         160,
-		MaxRecords:           maxItems,
-		MaxRegionsPerProcess: 32,
-		IncludeThreads:       true,
-	})
+func collectDrivers(maxItems int, opts Options) evidenceSection {
+	driverOpts := driveranalysis.Options{
+		HashLimitBytes: opts.HashLimitBytes,
+		MaxRecords:     maxItems,
+	}
+	var snapshot driveranalysis.Snapshot
+	var err error
+	if opts.Evidence != nil {
+		snapshot, err = opts.Evidence.Drivers(driverOpts, false)
+	} else {
+		snapshot, err = driveranalysis.Collect(driverOpts)
+	}
+	if err != nil {
+		return sectionError(sectionDrivers, "内核驱动风险", err)
+	}
+	return evidenceSection{
+		Key:              sectionDrivers,
+		Label:            "内核驱动风险",
+		Count:            len(snapshot.Items),
+		Note:             snapshot.SourceSummary,
+		CollectionErrors: snapshot.CollectionErrors,
+		Items:            snapshot.Items,
+	}
+}
+
+func collectMemory(maxItems int, opts Options) evidenceSection {
+	memoryOpts := aiMemoryOptions(maxItems)
+	var snapshot memoryscan.Snapshot
+	var err error
+	if opts.Evidence != nil {
+		snapshot, err = opts.Evidence.Memory(memoryOpts, false)
+	} else {
+		snapshot, err = memoryscan.Collect(memoryOpts)
+	}
 	if err != nil {
 		return sectionError(sectionMemory, "内存异常", err)
 	}
@@ -588,8 +813,24 @@ func collectMemory(maxItems int) evidenceSection {
 	}
 }
 
+func aiMemoryOptions(maxItems int) memoryscan.Options {
+	return memoryscan.Options{
+		MaxProcesses:         160,
+		MaxRecords:           maxItems,
+		MaxRegionsPerProcess: 32,
+		IncludeThreads:       true,
+	}
+}
+
 func collectHost(maxItems int, opts Options) evidenceSection {
-	snapshot, err := host.Collect(host.Options{HashLimitBytes: opts.HashLimitBytes})
+	hostOpts := host.Options{HashLimitBytes: opts.HashLimitBytes}
+	var snapshot host.Snapshot
+	var err error
+	if opts.Evidence != nil {
+		snapshot, err = opts.Evidence.Host(hostOpts, false)
+	} else {
+		snapshot, err = host.Collect(hostOpts)
+	}
 	if err != nil {
 		return sectionError(sectionHost, "主机信息", err)
 	}
@@ -616,11 +857,18 @@ func collectHost(maxItems int, opts Options) evidenceSection {
 	}
 }
 
-func collectFileTrace(maxItems int) evidenceSection {
-	snapshot, err := filetrace.Collect(filetrace.Options{
+func collectFileTrace(maxItems int, opts Options) evidenceSection {
+	traceOpts := filetrace.Options{
 		MaxRecords: maxItems,
 		Hours:      24 * 7,
-	})
+	}
+	var snapshot filetrace.Snapshot
+	var err error
+	if opts.Evidence != nil {
+		snapshot, err = opts.Evidence.FileTraces(traceOpts, false)
+	} else {
+		snapshot, err = filetrace.Collect(traceOpts)
+	}
 	if err != nil {
 		return sectionError(sectionFileTrace, "文件痕迹", err)
 	}
@@ -637,13 +885,20 @@ func collectFileTrace(maxItems int) evidenceSection {
 	}
 }
 
-func collectHistory(maxItems int) evidenceSection {
+func collectHistory(maxItems int, opts Options) evidenceSection {
 	now := time.Now()
-	snapshot, err := history.Collect(history.Options{
+	historyOpts := history.Options{
 		MaxRecords: maxItems,
 		StartTime:  now.Add(-7 * 24 * time.Hour),
 		EndTime:    now,
-	})
+	}
+	var snapshot history.Snapshot
+	var err error
+	if opts.Evidence != nil {
+		snapshot, err = opts.Evidence.History(historyOpts, false)
+	} else {
+		snapshot, err = history.Collect(historyOpts)
+	}
 	if err != nil {
 		return sectionError(sectionHistory, "历史通信", err)
 	}
@@ -657,28 +912,93 @@ func collectHistory(maxItems int) evidenceSection {
 	}
 }
 
-func collectSecurity(maxItems int) evidenceSection {
+func collectSecurity(maxItems int, opts Options) evidenceSection {
 	now := time.Now()
-	snapshot, err := securitylog.Collect(securitylog.Options{
+	securityOpts := securitylog.Options{
 		MaxRecords: maxItems,
 		StartTime:  now.Add(-7 * 24 * time.Hour),
 		EndTime:    now,
-	})
+	}
+	var snapshot securitylog.Snapshot
+	var err error
+	if opts.Evidence != nil {
+		snapshot, err = opts.Evidence.Security(securityOpts, false)
+	} else {
+		snapshot, err = securitylog.Collect(securityOpts)
+	}
+	collectionErrors := append([]string(nil), snapshot.CollectionErrors...)
+	events := []securitylog.Event{}
 	if err != nil {
-		return sectionError(sectionSecurity, "事件日志", err)
+		collectionErrors = append(collectionErrors, "事件日志读取失败: "+err.Error())
+	} else {
+		events = securitylog.FilterPowerShellNoise(snapshot.Events)
+	}
+	health := collectLogHealth(maxItems, opts)
+	if len(health.CollectionErrors) > 0 {
+		for _, healthErr := range health.CollectionErrors {
+			collectionErrors = append(collectionErrors, "日志健康: "+healthErr)
+		}
 	}
 	return evidenceSection{
 		Key:              sectionSecurity,
-		Label:            "事件日志",
-		Count:            len(snapshot.Events),
-		Note:             "最近 7 天",
-		CollectionErrors: snapshot.CollectionErrors,
-		Items:            limitSlice(snapshot.Events, maxItems),
+		Label:            "事件日志与日志健康",
+		Count:            len(events) + health.Count,
+		Note:             "最近 7 天；已排除 WinTraceLens 采集脚本和低价值 PowerShell 生命周期日志；" + health.Note,
+		CollectionErrors: collectionErrors,
+		Items: map[string]any{
+			"events":    limitSlice(events, maxItems),
+			"logHealth": health.Items,
+		},
 	}
 }
 
-func collectLogHealth(maxItems int) evidenceSection {
-	snapshot, err := loghealth.Collect()
+func collectInvestigation(maxItems int, opts Options) evidenceSection {
+	now := time.Now()
+	caseOpts := investigation.Options{
+		MaxRecords:     maxItems,
+		StartTime:      now.Add(-7 * 24 * time.Hour),
+		EndTime:        now,
+		Hours:          24 * 7,
+		HashLimitBytes: opts.HashLimitBytes,
+	}
+	var snapshot investigation.Snapshot
+	if opts.Evidence == nil {
+		snapshot = investigation.Collect(caseOpts)
+	} else {
+		sources := investigation.Sources{}
+		sources.Processes, sources.ProcessError = opts.Evidence.Processes(process.Options{HashLimitBytes: opts.HashLimitBytes}, false)
+		sources.Host, sources.HostError = opts.Evidence.Host(host.Options{HashLimitBytes: opts.HashLimitBytes}, false)
+		sources.FileTrace, sources.FileTraceError = opts.Evidence.FileTraces(filetrace.Options{MaxRecords: maxItems, Hours: 24 * 7, ArtifactsOnly: true}, false)
+		sources.History, sources.HistoryError = opts.Evidence.History(history.Options{MaxRecords: maxItems, StartTime: caseOpts.StartTime, EndTime: caseOpts.EndTime}, false)
+		sources.Security, sources.SecurityError = opts.Evidence.Security(securitylog.Options{MaxRecords: maxItems, StartTime: caseOpts.StartTime, EndTime: caseOpts.EndTime}, false)
+		sources.Drivers, sources.DriverError = opts.Evidence.Drivers(driveranalysis.Options{HashLimitBytes: opts.HashLimitBytes, MaxRecords: maxItems}, false)
+		sources.Connections, sources.ConnectionError = opts.Evidence.Connections(false)
+		snapshot = investigation.Build(caseOpts, sources)
+	}
+	return evidenceSection{
+		Key:              sectionCase,
+		Label:            "案件时间线与实体",
+		Count:            len(snapshot.Timeline),
+		Note:             fmt.Sprintf("最近 7 天综合证据，重点事件 %d 条；该模块用于跨来源关联，可能与单独模块存在必要重叠", snapshot.FocusCount),
+		CollectionErrors: snapshot.CollectionErrors,
+		Items: map[string]any{
+			"scenario":   snapshot.Scenario,
+			"focusCount": snapshot.FocusCount,
+			"coverage":   snapshot.Coverage,
+			"timeline":   limitSlice(snapshot.Timeline, maxItems),
+			"entities":   limitSlice(snapshot.Entities, maxItems),
+		},
+	}
+}
+
+func collectLogHealth(maxItems int, opts Options) evidenceSection {
+	var snapshot loghealth.Snapshot
+	var err error
+	if opts.Evidence != nil {
+		snapshot, err = opts.Evidence.LogHealth(false)
+	} else {
+		snapshot, err = loghealth.Collect()
+	}
 	if err != nil {
 		return sectionError(sectionLogHealth, "日志健康", err)
 	}
@@ -723,6 +1043,9 @@ func processScore(item process.Info) int {
 	if item.HashError != "" || item.PathError != "" {
 		score += 20
 	}
+	if item.EnumerationWarning != "" {
+		score += 180
+	}
 	return score
 }
 
@@ -743,19 +1066,21 @@ func limitProcesses(items []process.Info, connectionsByPID map[uint32][]process.
 	for _, item := range items[:limit] {
 		connections := connectionsByPID[item.PID]
 		out = append(out, map[string]any{
-			"pid":             item.PID,
-			"name":            item.Name,
-			"parentPid":       item.ParentPID,
-			"parentName":      item.ParentName,
-			"createdAt":       item.CreatedAt,
-			"path":            item.Path,
-			"md5":             item.MD5,
-			"signature":       item.Signature,
-			"signatureMsg":    trimText(item.SignatureMsg, 260),
-			"connectionCount": item.ConnectionCount,
-			"connections":     limitConnections(connections, 12),
-			"hashError":       trimText(item.HashError, 260),
-			"pathError":       trimText(item.PathError, 260),
+			"pid":                item.PID,
+			"name":               item.Name,
+			"parentPid":          item.ParentPID,
+			"parentName":         item.ParentName,
+			"createdAt":          item.CreatedAt,
+			"path":               item.Path,
+			"md5":                item.MD5,
+			"signature":          item.Signature,
+			"signatureMsg":       trimText(item.SignatureMsg, 260),
+			"connectionCount":    item.ConnectionCount,
+			"connections":        limitConnections(connections, 12),
+			"hashError":          trimText(item.HashError, 260),
+			"pathError":          trimText(item.PathError, 260),
+			"enumerationSources": item.EnumerationSources,
+			"enumerationWarning": trimText(item.EnumerationWarning, 300),
 		})
 	}
 	return out
@@ -881,6 +1206,9 @@ func systemPrompt() string {
 		"你是 Windows 应急响应分析助手，正在协助分析 WinTraceLens 采集到的主机数据。",
 		"只能基于输入证据判断，不要编造不存在的进程、日志或网络连接。",
 		"用中文输出，优先给出可执行的排查顺序，标明证据来源和不确定性。",
+		"风险线索已经对可信浏览器、Electron、Windows 组件的弱 JIT 内存和普通自启动做过降噪；不要把正常持久化配置重新解释为恶意。",
+		"只有无签名、签名异常、可写路径、脚本任务、IFEO、强内存信号或多来源互相印证时，才提高结论置信度。",
+		"案件时间线与单独模块可能包含同一证据，分析时应去重，不要把重复出现当作多个独立信号。",
 		"不要建议直接删除文件或杀进程；涉及处置时先建议备份、导出证据、确认业务影响。",
 	}, "\n")
 }

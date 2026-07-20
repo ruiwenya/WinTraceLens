@@ -67,9 +67,12 @@ func Collect(opts Options) ([]Info, error) {
 	}
 
 	names := make(map[uint32]string, len(entries))
+	toolhelpPIDs := make(map[uint32]struct{}, len(entries))
 	for _, entry := range entries {
 		names[entry.ProcessID] = utf16String(entry.ExeFile[:])
+		toolhelpPIDs[entry.ProcessID] = struct{}{}
 	}
+	nativeProcesses, nativeErr := snapshotProcessesNative()
 
 	hashCache := make(map[string]struct {
 		value string
@@ -117,22 +120,72 @@ func Collect(opts Options) ([]Info, error) {
 			}
 		}
 
+		sources := "Toolhelp32 进程视图"
+		warning := ""
+		if nativeErr == nil {
+			if _, ok := nativeProcesses[entry.ProcessID]; ok {
+				sources += " + NT 系统信息视图"
+			} else if path != "" {
+				warning = "Toolhelp32 视图可见，但 NT 系统信息视图未发现；请排除进程瞬时退出或枚举链路被干扰"
+			}
+		}
 		items = append(items, Info{
-			PID:             entry.ProcessID,
-			Name:            names[entry.ProcessID],
-			ParentPID:       entry.ParentProcessID,
-			ParentName:      names[entry.ParentProcessID],
-			CreatedAt:       formatTime(createdAt),
-			Path:            path,
-			FileCreated:     formatTime(fileCreated),
-			FileModified:    formatTime(fileModified),
-			MD5:             md5Value,
-			Signature:       sig.Status,
-			SignatureMsg:    sig.Message,
-			ConnectionCount: connectionCount[entry.ProcessID],
-			HashError:       hashErr,
-			PathError:       pathErr,
+			PID:                entry.ProcessID,
+			Name:               names[entry.ProcessID],
+			ParentPID:          entry.ParentProcessID,
+			ParentName:         names[entry.ParentProcessID],
+			CreatedAt:          formatTime(createdAt),
+			Path:               path,
+			FileCreated:        formatTime(fileCreated),
+			FileModified:       formatTime(fileModified),
+			MD5:                md5Value,
+			Signature:          sig.Status,
+			SignatureMsg:       sig.Message,
+			ConnectionCount:    connectionCount[entry.ProcessID],
+			HashError:          hashErr,
+			PathError:          pathErr,
+			EnumerationSources: sources,
+			EnumerationWarning: warning,
 		})
+	}
+
+	if nativeErr == nil {
+		for pid, name := range nativeProcesses {
+			if _, ok := toolhelpPIDs[pid]; ok {
+				continue
+			}
+			path, pathErr := queryProcessPath(pid)
+			items = append(items, Info{
+				PID:                pid,
+				Name:               firstNonEmpty(name, "[NT 枚举进程]"),
+				Path:               path,
+				PathError:          pathErr,
+				ConnectionCount:    connectionCount[pid],
+				EnumerationSources: "NT 系统信息视图",
+				EnumerationWarning: "NT 系统信息视图可见，但 Toolhelp32 视图未发现；可能是进程创建/退出竞态，也可能存在枚举差异",
+			})
+		}
+		for pid, count := range connectionCount {
+			if pid == 0 {
+				continue
+			}
+			if _, inToolhelp := toolhelpPIDs[pid]; inToolhelp {
+				continue
+			}
+			if _, inNative := nativeProcesses[pid]; inNative {
+				continue
+			}
+			path, pathErr := queryProcessPath(pid)
+			items = append(items, Info{
+				PID:                pid,
+				Name:               "[连接表 PID]",
+				Path:               path,
+				PathError:          pathErr,
+				ConnectionCount:    count,
+				EnumerationSources: "TCP/UDP 连接表",
+				EnumerationWarning: "连接表仍引用该 PID，但两种进程视图均未发现；请先排除连接残留和进程退出竞态",
+			})
+		}
 	}
 
 	sort.Slice(items, func(i, j int) bool {
@@ -142,7 +195,23 @@ func Collect(opts Options) ([]Info, error) {
 	return items, nil
 }
 
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 func Modules(pid uint32, opts Options) ([]ModuleInfo, error) {
+	if pid == 4 {
+		return kernelModules(opts)
+	}
+	return processModules(pid, opts)
+}
+
+func processModules(pid uint32, opts Options) ([]ModuleInfo, error) {
 	handle, _, err := procCreateToolhelp32Snapshot.Call(th32csSnapModule|th32csSnapModule32, uintptr(pid))
 	if handle == uintptr(syscall.InvalidHandle) {
 		return nil, err
@@ -165,34 +234,11 @@ func Modules(pid uint32, opts Options) ([]ModuleInfo, error) {
 	var modules []ModuleInfo
 	for {
 		path := utf16String(entry.ExePath[:])
-		key := strings.ToLower(path)
-
-		var md5Value, hashErr string
-		if path != "" && !opts.SkipHashes {
-			if cached, ok := hashCache[key]; ok {
-				md5Value = cached.value
-				hashErr = cached.err
-			} else {
-				md5Value, hashErr = fileMD5(path, opts.HashLimitBytes)
-				hashCache[key] = struct {
-					value string
-					err   string
-				}{value: md5Value, err: hashErr}
-			}
-		}
-
-		var sig SignatureResult
-		if path != "" && !opts.SkipSignatures {
-			if cached, ok := signatureCache[key]; ok {
-				sig = cached
-			} else {
-				sig = CheckSignature(path)
-				signatureCache[key] = sig
-			}
-		}
+		md5Value, hashErr, sig := moduleFileMetadata(path, opts, hashCache, signatureCache)
 
 		modules = append(modules, ModuleInfo{
 			Name:         utf16String(entry.ModuleName[:]),
+			Kind:         "进程模块",
 			Path:         path,
 			BaseAddress:  fmt.Sprintf("0x%X", entry.ModBaseAddr),
 			SizeKB:       entry.ModBaseSize / 1024,
@@ -213,6 +259,42 @@ func Modules(pid uint32, opts Options) ([]ModuleInfo, error) {
 	})
 
 	return modules, nil
+}
+
+func moduleFileMetadata(path string, opts Options, hashCache map[string]struct {
+	value string
+	err   string
+}, signatureCache map[string]SignatureResult) (string, string, SignatureResult) {
+	if path == "" {
+		return "", "", SignatureResult{}
+	}
+
+	key := strings.ToLower(path)
+	var md5Value, hashErr string
+	if !opts.SkipHashes {
+		if cached, ok := hashCache[key]; ok {
+			md5Value = cached.value
+			hashErr = cached.err
+		} else {
+			md5Value, hashErr = fileMD5(path, opts.HashLimitBytes)
+			hashCache[key] = struct {
+				value string
+				err   string
+			}{value: md5Value, err: hashErr}
+		}
+	}
+
+	var sig SignatureResult
+	if !opts.SkipSignatures {
+		if cached, ok := signatureCache[key]; ok {
+			sig = cached
+		} else {
+			sig = CheckSignature(path)
+			signatureCache[key] = sig
+		}
+	}
+
+	return md5Value, hashErr, sig
 }
 
 func snapshotProcesses() ([]processEntry32, error) {
@@ -245,7 +327,10 @@ func snapshotProcesses() ([]processEntry32, error) {
 func queryProcessPath(pid uint32) (string, string) {
 	handle, _, err := procOpenProcess.Call(processQueryLimitedInformation, 0, uintptr(pid))
 	if handle == 0 {
-		return "", err.Error()
+		if pid == 0 || pid == 4 {
+			return "", "系统进程路径无法通过常规接口读取"
+		}
+		return "", friendlyFileError(err)
 	}
 	defer procCloseHandle.Call(handle)
 
@@ -258,7 +343,10 @@ func queryProcessPath(pid uint32) (string, string) {
 		uintptr(unsafe.Pointer(&size)),
 	)
 	if ret == 0 {
-		return "", err.Error()
+		if pid == 0 || pid == 4 {
+			return "", "系统进程路径无法通过常规接口读取"
+		}
+		return "", friendlyFileError(err)
 	}
 
 	return syscall.UTF16ToString(buf[:size]), ""

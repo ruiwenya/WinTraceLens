@@ -311,7 +311,7 @@
     }
   </style>
   <link rel="stylesheet" href="/nav.css">
-  <script src="/app.js" defer></script>
+  <script src="/app.js"></script>
 </head>
 <body>
   <header>
@@ -327,12 +327,12 @@
       <nav class="top-nav" aria-label="主要功能">
         <a class="nav-link" href="/">进程信息</a>
         <a class="nav-link" href="/host.html">主机信息</a>
-        <a class="nav-link" href="/findings.html">关注项</a>
+        <a class="nav-link" href="/findings.html">风险线索</a>
         <a class="nav-link" href="/threat.html">威胁分析</a>
+        <a class="nav-link" href="/investigation.html">案件调查</a>
         <a class="nav-link" href="/filetrace.html">文件痕迹</a>
         <a class="nav-link" href="/history.html">历史通信</a>
         <a class="nav-link" href="/security.html">事件日志</a>
-        <a class="nav-link" href="/health.html">日志健康</a>
         <a class="nav-link" aria-current="page" href="/yara.html">YARA扫描</a>
         <a class="nav-link" href="/ai.html">AI分析</a>
       </nav>
@@ -432,7 +432,7 @@
           <button id="scan-processes" class="warn">开始进程内存扫描</button>
           <button id="stop-scan-processes" class="secondary" disabled>停止扫描</button>
         </div>
-        <input id="process-filter" placeholder="按 PID、进程名、路径过滤">
+        <input id="process-filter" placeholder="按 PID、进程名、路径过滤；支持 /正则/i">
         <div id="process-table" class="table-wrap">
           <div class="empty">正在加载进程列表...</div>
         </div>
@@ -640,10 +640,9 @@
     }
 
     function processMatches(item) {
-      const q = processFilter.value.trim().toLowerCase();
+      const q = processFilter.value.trim();
       if (!q) return true;
-      return [item.pid, item.name, item.path, item.parentName]
-        .some(value => String(value || '').toLowerCase().includes(q));
+      return window.wtlMatchesQuery(q, [item.pid, item.name, item.path, item.parentName]);
     }
 
     function visibleProcesses() {

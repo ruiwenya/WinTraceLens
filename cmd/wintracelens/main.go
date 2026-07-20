@@ -13,7 +13,7 @@ import (
 	"github.com/ruiwenya/WinTraceLens/internal/server"
 )
 
-var version = "1.0.0-basic"
+var version = "2.0.0-preview"
 
 func main() {
 	addr := flag.String("addr", "127.0.0.1:8787", "HTTP listen address")
@@ -32,7 +32,7 @@ func main() {
 		Version:        version,
 	})
 
-	url := fmt.Sprintf("http://%s", *addr)
+	url := srv.BootstrapURL(fmt.Sprintf("http://%s", *addr))
 	listener, err := net.Listen("tcp", *addr)
 	if err != nil {
 		log.Fatal(err)

@@ -232,7 +232,7 @@ $ordered = @($records | Sort-Object @{Expression={ if ($_.Time) { $_.Time } else
 } | ConvertTo-Json -Compress -Depth 5
 `, maxRecords, startRaw, endRaw)
 
-	cmd := winexec.Command("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script)
+	cmd := winexec.PowerShell(script)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()

@@ -28,6 +28,14 @@ type Snapshot struct {
 	SourceSummary    string   `json:"sourceSummary"`
 }
 
+type Sources struct {
+	Processes        []process.Info
+	Host             host.Snapshot
+	Memory           memoryscan.Snapshot
+	FileTrace        filetrace.Snapshot
+	CollectionErrors []string
+}
+
 type Item struct {
 	Level       string `json:"level"`
 	Scenario    string `json:"scenario"`
@@ -57,6 +65,15 @@ type evidenceBuilder struct {
 	hasBadPath   bool
 }
 
+type persistenceEvidence struct {
+	label   string
+	score   int
+	strong  bool
+	reasons []string
+}
+
+type persistenceIndex map[string][]persistenceEvidence
+
 const (
 	signatureUnsigned = "无签名请注意!!!"
 	signatureBad      = "签名异常"
@@ -65,47 +82,56 @@ const (
 
 func Collect(opts Options) (Snapshot, error) {
 	opts = normalizeOptions(opts)
-	snapshot := Snapshot{
-		Items:            make([]Item, 0),
-		CollectionErrors: make([]string, 0),
-		GeneratedAt:      time.Now().Format("2006-01-02 15:04:05"),
-	}
-
 	processes, err := process.Collect(process.Options{HashLimitBytes: opts.HashLimitBytes})
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("process collection: %w", err)
 	}
 
+	sources := Sources{Processes: processes}
 	hostSnapshot, err := host.Collect(host.Options{HashLimitBytes: opts.HashLimitBytes})
 	if err != nil {
-		snapshot.CollectionErrors = append(snapshot.CollectionErrors, "主机持久化采集失败: "+err.Error())
+		sources.CollectionErrors = append(sources.CollectionErrors, "主机持久化采集失败: "+err.Error())
 	}
+	sources.Host = hostSnapshot
 
-	var memorySnapshot memoryscan.Snapshot
 	if opts.IncludeMemory {
-		memorySnapshot = memoryscan.CollectForProcesses(processes, memoryscan.Options{
+		sources.Memory = memoryscan.CollectForProcesses(processes, memoryscan.Options{
 			MaxProcesses:         len(processes),
 			MaxRecords:           1000,
 			MaxRegionsPerProcess: 48,
 			IncludeThreads:       true,
 		})
-		snapshot.CollectionErrors = append(snapshot.CollectionErrors, memorySnapshot.CollectionErrors...)
+		sources.CollectionErrors = append(sources.CollectionErrors, sources.Memory.CollectionErrors...)
 	}
 
-	var traceSnapshot filetrace.Snapshot
 	if opts.IncludeFileTrace {
-		traceSnapshot, err = filetrace.Collect(filetrace.Options{
+		sources.FileTrace, err = filetrace.Collect(filetrace.Options{
 			MaxRecords: 300,
 			Hours:      24 * 7,
 		})
 		if err != nil {
-			snapshot.CollectionErrors = append(snapshot.CollectionErrors, "文件痕迹采集失败: "+err.Error())
+			sources.CollectionErrors = append(sources.CollectionErrors, "文件痕迹采集失败: "+err.Error())
 		} else {
-			snapshot.CollectionErrors = append(snapshot.CollectionErrors, traceSnapshot.CollectionErrors...)
+			sources.CollectionErrors = append(sources.CollectionErrors, sources.FileTrace.CollectionErrors...)
 		}
 	}
+	return Build(opts, sources), nil
+}
+
+func Build(opts Options, sources Sources) Snapshot {
+	opts = normalizeOptions(opts)
+	snapshot := Snapshot{
+		Items:            make([]Item, 0),
+		CollectionErrors: append([]string(nil), sources.CollectionErrors...),
+		GeneratedAt:      time.Now().Format("2006-01-02 15:04:05"),
+	}
+	processes := sources.Processes
+	hostSnapshot := sources.Host
+	memorySnapshot := sources.Memory
+	traceSnapshot := sources.FileTrace
 
 	persistence := buildPersistenceIndex(hostSnapshot)
+	primaryPersistencePID := buildPrimaryProcessPathIndex(processes)
 	traces := buildTraceIndex(traceSnapshot)
 	memoryByPID := buildMemoryIndex(memorySnapshot)
 	runningPaths := make(map[string]struct{})
@@ -114,7 +140,9 @@ func Collect(opts Options) (Snapshot, error) {
 		if item.Path != "" {
 			runningPaths[normalizePath(item.Path)] = struct{}{}
 		}
-		if result, ok := analyzeProcess(item, persistence, traces, memoryByPID); ok {
+		pathKey := normalizePath(item.Path)
+		associatePersistence := pathKey != "" && primaryPersistencePID[pathKey] == item.PID
+		if result, ok := analyzeProcess(item, persistence, traces, memoryByPID, associatePersistence); ok {
 			snapshot.Items = append(snapshot.Items, result)
 		}
 	}
@@ -148,7 +176,7 @@ func Collect(opts Options) (Snapshot, error) {
 		len(memorySnapshot.Records),
 		len(traceSnapshot.Records),
 	)
-	return snapshot, nil
+	return snapshot
 }
 
 func normalizeOptions(opts Options) Options {
@@ -161,7 +189,7 @@ func normalizeOptions(opts Options) Options {
 	return opts
 }
 
-func analyzeProcess(item process.Info, persistence map[string][]string, traces traceIndex, memoryByPID map[uint32][]memoryscan.Record) (Item, bool) {
+func analyzeProcess(item process.Info, persistence persistenceIndex, traces traceIndex, memoryByPID map[uint32][]memoryscan.Record, associatePersistence bool) (Item, bool) {
 	if selfidentity.IsSelfProcess(item.PID, item.Path) {
 		return Item{}, false
 	}
@@ -171,8 +199,9 @@ func analyzeProcess(item process.Info, persistence map[string][]string, traces t
 	pathKey := normalizePath(item.Path)
 	profile := expectedProcessProfile(item)
 	trusted := isTrustedSignature(item.Signature)
+	normalExpected := profile != "" && (trusted || isExpectedPackagedApp(item))
 	scannerPowerShell := isScannerPowerShell(item)
-	expectedMemory := profile != ""
+	expectedMemory := normalExpected
 	expectedNetwork := isExpectedNetworkClient(item.Name, item.Path)
 
 	if records := memoryByPID[item.PID]; len(records) > 0 {
@@ -215,7 +244,7 @@ func analyzeProcess(item process.Info, persistence map[string][]string, traces t
 		points := 5
 		signal := "连接数异常"
 		evidence := fmt.Sprintf("当前实时连接数 %d", item.ConnectionCount)
-		if expectedNetwork && trusted {
+		if expectedNetwork && normalExpected {
 			points = 1
 			signal = "常见网络客户端连接数"
 			evidence += "，浏览器/聊天/开发工具已降噪"
@@ -227,7 +256,7 @@ func analyzeProcess(item process.Info, persistence map[string][]string, traces t
 		points := 3
 		signal := "连接数偏高"
 		evidence := fmt.Sprintf("当前实时连接数 %d", item.ConnectionCount)
-		if expectedNetwork && trusted {
+		if expectedNetwork && normalExpected {
 			points = 1
 			signal = "常见网络客户端连接数"
 			evidence += "，已降噪"
@@ -245,7 +274,7 @@ func analyzeProcess(item process.Info, persistence map[string][]string, traces t
 	case signatureUnsigned:
 		if item.ConnectionCount > 0 || isWritablePath(item.Path) {
 			points := 4
-			if profile != "" {
+			if normalExpected {
 				points = 2
 				builder.hasExpected = true
 			}
@@ -260,7 +289,7 @@ func analyzeProcess(item process.Info, persistence map[string][]string, traces t
 	} else if isWritablePath(item.Path) && item.Signature != signatureSystem {
 		points := 3
 		evidence := item.Path
-		if profile != "" && (trusted || isExpectedUserWritableApp(item.Name, item.Path)) {
+		if normalExpected && (trusted || isExpectedUserWritableApp(item.Name, item.Path)) {
 			points = 1
 			evidence += "，常见用户态安装/开发工具路径已降噪"
 			builder.hasExpected = true
@@ -280,9 +309,11 @@ func analyzeProcess(item process.Info, persistence map[string][]string, traces t
 	}
 
 	if pathKey != "" {
-		if related := persistence[pathKey]; len(related) > 0 {
-			builder.add(3, "命中持久化项", strings.Join(related, "；"))
-			builder.hasPersist = true
+		if related := persistence[pathKey]; associatePersistence && len(related) > 0 {
+			if score, evidence := suspiciousPersistenceForProcess(related, normalExpected); score > 0 {
+				builder.add(score, "可疑持久化关联", evidence)
+				builder.hasPersist = true
+			}
 		}
 		if related := traces.byPath[pathKey]; len(related) > 0 {
 			for _, trace := range related {
@@ -294,6 +325,16 @@ func analyzeProcess(item process.Info, persistence map[string][]string, traces t
 				builder.add(points, "命中近期文件痕迹", fmt.Sprintf("%s/%s/%s", trace.Category, trace.Suspicion, trace.Reason))
 			}
 		}
+	}
+
+	if normalExpected && onlyExpectedSignals(builder) {
+		return Item{}, false
+	}
+
+	if isPowerShellName(strings.TrimSuffix(name, ".exe")) &&
+		trusted && builder.hasExpected && !builder.hasStrongMem && !builder.hasPersist &&
+		!builder.hasBadPath && !builder.hasLOLBIN && item.ConnectionCount == 0 {
+		return Item{}, false
 	}
 
 	if builder.score < 3 {
@@ -351,26 +392,98 @@ func buildMemoryIndex(snapshot memoryscan.Snapshot) map[uint32][]memoryscan.Reco
 	return index
 }
 
-func buildPersistenceIndex(snapshot host.Snapshot) map[string][]string {
-	index := make(map[string][]string)
-	add := func(path, label string) {
+func buildPersistenceIndex(snapshot host.Snapshot) persistenceIndex {
+	index := make(persistenceIndex)
+	add := func(path, label, signature, command, hashError string, forcedStrong bool) {
 		key := normalizePath(path)
 		if key == "" {
 			return
 		}
-		index[key] = append(index[key], label)
+		evidence := classifyPersistenceEvidence(label, path, signature, command, hashError, forcedStrong)
+		index[key] = append(index[key], evidence)
 	}
 	for _, item := range snapshot.Services {
-		add(item.Path, "服务:"+displayName(item.Name, item.DisplayName))
+		add(item.Path, "服务:"+displayName(item.Name, item.DisplayName), item.Signature, item.Command, item.HashError, false)
 	}
 	for _, item := range snapshot.ScheduledTasks {
-		add(item.Executable, "计划任务:"+item.Name)
+		add(item.Executable, "计划任务:"+item.Name, item.Signature, item.Command+" "+item.Arguments, item.HashError, false)
 	}
 	for _, item := range snapshot.StartupItems {
-		add(item.Path, "启动项:"+item.Name)
+		add(item.Path, "启动项:"+item.Name, item.Signature, item.Command, item.HashError, false)
 	}
 	for _, item := range snapshot.ImageHijacks {
-		add(item.Path, "镜像劫持:"+item.Image)
+		add(item.Path, "镜像劫持:"+item.Image, item.Signature, item.Debugger, item.HashError, true)
+	}
+	return index
+}
+
+func classifyPersistenceEvidence(label, path, signature, command, hashError string, forcedStrong bool) persistenceEvidence {
+	evidence := persistenceEvidence{label: label, strong: forcedStrong}
+	if forcedStrong {
+		evidence.score += 5
+		evidence.reasons = append(evidence.reasons, "镜像劫持配置")
+	}
+	switch signature {
+	case signatureBad:
+		evidence.score += 5
+		evidence.strong = true
+		evidence.reasons = append(evidence.reasons, "签名异常")
+	case signatureUnsigned:
+		evidence.score += 3
+		evidence.reasons = append(evidence.reasons, "无签名")
+	}
+	if hasScriptOrLOLBIN(command) {
+		evidence.score += 3
+		evidence.strong = true
+		evidence.reasons = append(evidence.reasons, "脚本或系统工具启动")
+	}
+	if isWritablePath(path) && !isTrustedSignature(signature) {
+		evidence.score += 2
+		evidence.strong = true
+		evidence.reasons = append(evidence.reasons, "用户可写路径")
+	}
+	if strings.TrimSpace(hashError) != "" && signature == "" {
+		evidence.score++
+		evidence.reasons = append(evidence.reasons, "文件校验失败")
+	}
+	if evidence.score > 5 {
+		evidence.score = 5
+	}
+	return evidence
+}
+
+func suspiciousPersistenceForProcess(entries []persistenceEvidence, normalExpected bool) (int, string) {
+	score := 0
+	details := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.score <= 0 || (normalExpected && !entry.strong) {
+			continue
+		}
+		if entry.score > score {
+			score = entry.score
+		}
+		detail := entry.label
+		if len(entry.reasons) > 0 {
+			detail += "（" + strings.Join(entry.reasons, "、") + "）"
+		}
+		if !containsString(details, detail) {
+			details = append(details, detail)
+		}
+	}
+	return score, strings.Join(details, "；")
+}
+
+func buildPrimaryProcessPathIndex(processes []process.Info) map[string]uint32 {
+	index := make(map[string]uint32)
+	for _, item := range processes {
+		key := normalizePath(item.Path)
+		if key == "" {
+			continue
+		}
+		current, ok := index[key]
+		if !ok || item.PID < current {
+			index[key] = item.PID
+		}
 	}
 	return index
 }
@@ -501,6 +614,12 @@ func scenarioFor(builder evidenceBuilder) string {
 	if onlyExpectedSignals(builder) {
 		return "常见软件行为观察"
 	}
+	if builder.hasPersist && builder.hasMemory {
+		if builder.hasStrongMem {
+			return "持久化与强内存异常"
+		}
+		return "可疑持久化关联"
+	}
 	if builder.hasMemory && builder.hasNetwork && builder.hasStrongMem {
 		return "疑似内存型远控/注入"
 	}
@@ -587,8 +706,14 @@ func expectedProcessProfile(item process.Info) string {
 	if lowerName == "explorer" && isWindowsExplorerPath(lowerPath) {
 		return "Windows Shell/扩展/Hook 动态内存"
 	}
+	if isExpectedWindowsRuntimeName(lowerName) {
+		return "Windows 组件/WinUI/.NET 动态代码"
+	}
 	if hasAny(lowerName, lowerPath, []string{"chrome", "msedge", "firefox", "browser"}) {
 		return "浏览器/JIT 动态代码"
+	}
+	if hasAny(lowerName, lowerPath, []string{"chatgpt", "openai"}) {
+		return "OpenAI 客户端/Electron 动态代码"
 	}
 	if hasAny(lowerName, lowerPath, []string{"wechat", "weixin", "wxwork", "qq", "tim", "teams", "slack", "discord"}) {
 		return "聊天客户端动态模块"
@@ -596,7 +721,7 @@ func expectedProcessProfile(item process.Info) string {
 	if hasAny(lowerName, lowerPath, []string{"huorong", "hips", "火绒", "360", "defender", "security", "avp", "edr", "xdr"}) {
 		return "安全软件 Hook/防护行为"
 	}
-	if hasAny(lowerName, lowerPath, []string{"code", "codex", "cursor", "node", "electron", "extension-host", "python", "go", "java"}) {
+	if hasAny(lowerName, lowerPath, []string{"utools", "code", "codex", "cursor", "node", "electron", "extension-host", "python", "go", "java"}) {
 		return "开发工具或运行时动态代码"
 	}
 	return ""
@@ -609,14 +734,15 @@ func isExpectedNetworkClient(name, path string) bool {
 		"chrome", "msedge", "firefox", "browser",
 		"wechat", "weixin", "wxwork", "qq", "tim",
 		"teams", "slack", "discord",
-		"code", "codex", "cursor", "node", "electron", "extension-host",
+		"chatgpt", "openai",
+		"utools", "code", "codex", "cursor", "node", "electron", "extension-host",
 	})
 }
 
 func isExpectedUserWritableApp(name, path string) bool {
 	lowerName := strings.TrimSuffix(strings.ToLower(name), ".exe")
 	lowerPath := strings.ToLower(strings.ReplaceAll(path, "/", `\`))
-	if hasAny(lowerName, lowerPath, []string{"codex", "code", "cursor", "node", "electron", "extension-host"}) {
+	if hasAny(lowerName, lowerPath, []string{"utools", "chatgpt", "openai", "codex", "code", "cursor", "node", "electron", "extension-host"}) {
 		return true
 	}
 	return strings.Contains(lowerPath, `\appdata\local\programs\`) || strings.Contains(lowerPath, `\.codex\`)
@@ -624,6 +750,27 @@ func isExpectedUserWritableApp(name, path string) bool {
 
 func isTrustedSignature(signature string) bool {
 	return signature == signatureSystem || signature == "已签名"
+}
+
+func isExpectedPackagedApp(item process.Info) bool {
+	name := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(item.Name)), ".exe")
+	path := normalizePath(item.Path)
+	if name != "chatgpt" && name != "codex" {
+		return false
+	}
+	return strings.Contains(path, `\program files\windowsapps\openai.`)
+}
+
+func isExpectedWindowsRuntimeName(name string) bool {
+	switch name {
+	case "runtimebroker", "lockapp", "searchhost", "searchapp",
+		"shellexperiencehost", "startmenuexperiencehost", "textinputhost",
+		"phoneexperiencehost", "crossdeviceservice", "applicationframehost",
+		"widgetboard", "widgets", "systemsettings", "securityhealthhost":
+		return true
+	default:
+		return false
+	}
 }
 
 func isScannerPowerShell(item process.Info) bool {
@@ -642,6 +789,12 @@ func isWindowsExplorerPath(path string) bool {
 
 func hasAny(name, path string, values []string) bool {
 	for _, value := range values {
+		if len(value) <= 3 {
+			if name == value || strings.HasPrefix(name, value+"-") || strings.HasPrefix(name, value+"_") || (value == "360" && strings.HasPrefix(name, value)) {
+				return true
+			}
+			continue
+		}
 		if strings.Contains(name, value) || strings.Contains(path, value) {
 			return true
 		}

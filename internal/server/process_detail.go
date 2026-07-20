@@ -29,9 +29,10 @@ type processDetailResponse struct {
 }
 
 func (s *Server) handleProcessDetail(w http.ResponseWriter, r *http.Request, pid uint32) {
-	processes, err := process.Collect(process.Options{
+	force := boolFromQuery(r, "refresh", false)
+	processes, err := s.evidenceStore.Processes(process.Options{
 		HashLimitBytes: s.options.HashLimitBytes,
-	})
+	}, force)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -74,23 +75,23 @@ func (s *Server) handleProcessDetail(w http.ResponseWriter, r *http.Request, pid
 	wg.Add(3)
 	go func() {
 		defer wg.Done()
-		hostSnapshot, hostErr = host.Collect(host.Options{HashLimitBytes: s.options.HashLimitBytes})
+		hostSnapshot, hostErr = s.evidenceStore.Host(host.Options{HashLimitBytes: s.options.HashLimitBytes}, force)
 	}()
 	go func() {
 		defer wg.Done()
-		historySnapshot, historyErr = history.Collect(history.Options{
+		historySnapshot, historyErr = s.evidenceStore.History(history.Options{
 			MaxRecords: maxRecords,
 			StartTime:  startTime,
 			EndTime:    endTime,
-		})
+		}, force)
 	}()
 	go func() {
 		defer wg.Done()
-		securitySnapshot, securityErr = securitylog.Collect(securitylog.Options{
+		securitySnapshot, securityErr = s.evidenceStore.Security(securitylog.Options{
 			MaxRecords: maxRecords,
 			StartTime:  startTime,
 			EndTime:    endTime,
-		})
+		}, force)
 	}()
 	wg.Wait()
 
@@ -205,6 +206,9 @@ func relatedSecurityEvents(items []securitylog.Event, proc process.Info) []secur
 	pid := strconv.FormatUint(uint64(proc.PID), 10)
 	out := make([]securitylog.Event, 0)
 	for _, item := range items {
+		if securitylog.IsWinTraceLensCollectorEvent(item) || securitylog.IsLowValuePowerShellEvent(item) {
+			continue
+		}
 		if strings.Contains(item.Process, pid) ||
 			relatedToProcess(proc, item.Process, item.Command, item.ServiceName, item.Message, item.Details) {
 			out = append(out, item)

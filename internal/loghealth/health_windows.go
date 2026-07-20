@@ -180,7 +180,7 @@ if ($sqlServices.Count -eq 0) {
   GeneratedAt=(Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
 } | ConvertTo-Json -Compress -Depth 5
 `
-	cmd := winexec.Command("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script)
+	cmd := winexec.PowerShell(script)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()

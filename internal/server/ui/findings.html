@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>WinTraceLens - 关注项</title>
+  <title>WinTraceLens - 风险线索</title>
   <style>
     :root {
       --bg: #f5f7fb;
@@ -47,12 +47,12 @@
     }
     main {
       display: grid;
-      grid-template-rows: auto auto minmax(0, 1fr);
+      grid-template-rows: auto auto auto minmax(0, 1fr);
       gap: 10px;
       height: calc(100vh - 48px);
       padding: 12px;
     }
-    .toolbar, .summary {
+    .toolbar, .summary, .tabs {
       display: flex;
       align-items: center;
       gap: 8px;
@@ -86,6 +86,16 @@
       border-color: var(--line);
       background: #fff;
       color: var(--text);
+    }
+    button.tab {
+      border-color: var(--line);
+      background: #fff;
+      color: var(--text);
+    }
+    button.tab.active {
+      border-color: var(--accent);
+      background: #e8f2fb;
+      color: var(--accent-dark);
     }
     button:disabled {
       cursor: not-allowed;
@@ -199,7 +209,7 @@
     .bad-text { color: var(--bad); }
   </style>
   <link rel="stylesheet" href="/nav.css">
-  <script src="/app.js" defer></script>
+  <script src="/app.js"></script>
 </head>
 <body>
   <header>
@@ -207,7 +217,7 @@
     <div class="app-meta">
       <span class="release-badge" data-app-version>1.0 基础版</span>
       <span class="permission-badge unknown" data-admin-status>权限检测中</span>
-      <span class="module-title">进程与持久化关注项汇总</span>
+      <span class="module-title">规则关注项与行为关联风险线索</span>
     </div>
   </header>
   <main>
@@ -215,21 +225,25 @@
       <nav class="top-nav" aria-label="主要功能">
         <a class="nav-link" href="/">进程信息</a>
         <a class="nav-link" href="/host.html">主机信息</a>
-        <a class="nav-link" aria-current="page" href="/findings.html">关注项</a>
+        <a class="nav-link" aria-current="page" href="/findings.html">风险线索</a>
         <a class="nav-link" href="/threat.html">威胁分析</a>
+        <a class="nav-link" href="/investigation.html">案件调查</a>
         <a class="nav-link" href="/filetrace.html">文件痕迹</a>
         <a class="nav-link" href="/history.html">历史通信</a>
         <a class="nav-link" href="/security.html">事件日志</a>
-        <a class="nav-link" href="/health.html">日志健康</a>
         <a class="nav-link" href="/yara.html">YARA扫描</a>
         <a class="nav-link" href="/ai.html">AI分析</a>
       </nav>
-      <span class="current-module">当前：关注项</span>
-      <button id="refresh">刷新关注项</button>
+      <span class="current-module">当前：风险线索</span>
+      <button id="refresh">刷新风险线索</button>
       <button id="copy-md5" class="secondary" disabled>复制可见 MD5</button>
       <button id="export-csv" class="secondary" disabled>导出 CSV</button>
-      <input id="filter" placeholder="按级别、来源、名称、原因、路径、命令、MD5 过滤">
+      <input id="filter" placeholder="按级别、来源、名称、路径、MD5 过滤；支持 /正则/i">
       <span id="status" class="status">尚未加载</span>
+    </div>
+    <div class="tabs">
+      <button class="tab active" data-tab="rules">规则关注项</button>
+      <button class="tab" data-tab="behavior">行为关联</button>
     </div>
     <div id="summary" class="summary"></div>
     <section class="panel">
@@ -247,6 +261,11 @@
     const copyMD5 = document.getElementById('copy-md5');
     const exportCSV = document.getElementById('export-csv');
     let findings = [];
+    let behaviorItems = [];
+    let activeTab = new URLSearchParams(location.search).get('tab') === 'behavior' ? 'behavior' : 'rules';
+    let generatedAt = '';
+    let sourceSummary = '';
+    let collectionErrors = [];
 
     function text(value) {
       return value == null ? '' : String(value);
@@ -279,9 +298,10 @@
     }
 
     function visibleItems() {
-      const q = filter.value.trim().toLowerCase();
-      if (!q) return findings;
-      return findings.filter(item => Object.values(item).some(v => text(v).toLowerCase().includes(q)));
+      const q = filter.value.trim();
+      const source = activeTab === 'behavior' ? behaviorItems : findings;
+      if (!q) return source;
+      return source.filter(item => window.wtlMatchesQuery(q, Object.values(item)));
     }
 
     function renderSummary(items) {
@@ -292,13 +312,46 @@
         <span class="count high">高 ${high}</span>
         <span class="count medium">中 ${medium}</span>
         <span class="count low">低 ${low}</span>
+        ${sourceSummary ? `<span class="count" title="${escapeCell(sourceSummary)}">${escapeCell(sourceSummary)}</span>` : ''}
+        ${collectionErrors.slice(0, 2).map(error => `<span class="count high" title="${escapeCell(error)}">采集提示</span>`).join('')}
       `;
+    }
+
+    function renderBehavior(items) {
+      if (!items.length) {
+        table.innerHTML = '<div class="empty">没有匹配的行为关联风险线索</div>';
+        return;
+      }
+      table.innerHTML = `<table><thead><tr>
+        <th class="level">级别</th><th class="source">场景</th><th class="level">评分</th><th class="level">PID</th>
+        <th class="name">进程/来源</th><th class="level">连接</th><th class="signature">签名</th><th class="path">路径</th>
+        <th class="reason">摘要</th><th class="extra">证据</th><th class="extra">关联信号</th>
+      </tr></thead><tbody>${items.map(x => `<tr>
+        <td class="level"><span class="pill ${levelClass(x.level)}">${escapeCell(x.level)}</span></td>
+        <td class="source" title="${escapeCell(x.scenario)}">${escapeCell(x.scenario)}</td>
+        <td class="level">${escapeCell(x.score)}</td><td class="level">${escapeCell(x.pid || '')}</td>
+        <td class="name" title="${escapeCell(x.process)}">${escapeCell(x.process)}</td><td class="level">${escapeCell(x.connections || 0)}</td>
+        <td class="signature" title="${escapeCell(x.signature)}">${escapeCell(x.signature)}</td>
+        <td class="path" title="${escapeCell(x.path)}">${escapeCell(x.path)}</td>
+        <td class="reason" title="${escapeCell(x.summary)}">${escapeCell(x.summary)}</td>
+        <td class="extra" title="${escapeCell(x.evidence)}">${escapeCell(x.evidence)}</td>
+        <td class="extra" title="${escapeCell(x.related)}">${escapeCell(x.related)}</td>
+      </tr>`).join('')}</tbody></table>`;
     }
 
     function render() {
       const items = visibleItems();
+      document.querySelectorAll('button.tab').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === activeTab));
+      filter.placeholder = activeTab === 'behavior'
+        ? '按级别、场景、进程、PID、路径或关联信号过滤；支持 /正则/i'
+        : '按级别、来源、名称、路径、MD5 过滤；支持 /正则/i';
       renderSummary(items);
-      statusEl.textContent = `显示 ${items.length} / ${findings.length}`;
+      const total = activeTab === 'behavior' ? behaviorItems.length : findings.length;
+      statusEl.textContent = `${activeTab === 'behavior' ? '行为关联' : '规则关注项'} ${items.length} / ${total}${generatedAt ? ` · ${generatedAt}` : ''}`;
+      if (activeTab === 'behavior') {
+        renderBehavior(items);
+        return;
+      }
       if (!items.length) {
         table.innerHTML = '<div class="empty">没有匹配的关注项</div>';
         return;
@@ -328,17 +381,24 @@
       return res.json();
     }
 
-    async function load() {
-      statusEl.textContent = '正在采集进程、主机信息并分析关注项...';
+    async function load(force = false) {
+      statusEl.textContent = activeTab === 'behavior' ? '正在关联进程、持久化、网络和内存异常...' : '正在分析规则关注项...';
       copyMD5.disabled = true;
       exportCSV.disabled = true;
       summaryEl.innerHTML = '';
-      table.innerHTML = '<div class="empty">正在采集关注项...</div>';
-      const data = await loadJSON('/api/findings');
-      findings = data.items || [];
+      table.innerHTML = `<div class="empty">正在加载${activeTab === 'behavior' ? '行为关联' : '规则关注项'}...</div>`;
+      const refresh = force ? '&refresh=1' : '';
+      const endpoint = activeTab === 'behavior'
+        ? `/api/threat/behavior?max=500&memory=1&filetrace=0${refresh}`
+        : `/api/findings?${force ? 'refresh=1' : ''}`;
+      const data = await loadJSON(endpoint);
+      if (activeTab === 'behavior') behaviorItems = data.items || [];
+      else findings = data.items || [];
+      generatedAt = data.generatedAt || '';
+      sourceSummary = data.sourceSummary || data.hostSummary || '';
+      collectionErrors = data.collectionErrors || [];
       copyMD5.disabled = false;
       exportCSV.disabled = false;
-      statusEl.textContent = `生成时间 ${data.generatedAt || ''}，关注项 ${findings.length}`;
       render();
     }
 
@@ -356,11 +416,9 @@
     }
 
     function downloadCSV(url) {
-      const a = document.createElement('a');
-      a.href = url;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
+      window.wtlDownload(url).catch(err => {
+        statusEl.textContent = `导出失败：${err.message || err}`;
+      });
     }
 
     function filterQueryString() {
@@ -369,7 +427,7 @@
     }
 
     document.getElementById('refresh').addEventListener('click', () => {
-      load().catch(err => {
+      load(true).catch(err => {
         table.innerHTML = `<div class="empty bad-text">${escapeCell(err.message)}</div>`;
         statusEl.textContent = '加载失败';
       });
@@ -383,7 +441,22 @@
 
     exportCSV.addEventListener('click', () => {
       statusEl.textContent = '正在生成 CSV...';
-      downloadCSV(`/api/findings.csv${filterQueryString()}`);
+      const endpoint = activeTab === 'behavior' ? '/api/threat/behavior.csv?max=500&memory=1&filetrace=0' : '/api/findings.csv?';
+      const q = filter.value.trim();
+      downloadCSV(`${endpoint}${q ? `${endpoint.includes('?') && !endpoint.endsWith('?') ? '&' : ''}q=${encodeURIComponent(q)}` : ''}`);
+    });
+
+    document.querySelectorAll('button.tab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        activeTab = btn.dataset.tab;
+        history.replaceState(null, '', activeTab === 'rules' ? '/findings.html' : '/findings.html?tab=behavior');
+        const loaded = activeTab === 'behavior' ? behaviorItems.length : findings.length;
+        if (loaded) render();
+        else load(false).catch(err => {
+          table.innerHTML = `<div class="empty bad-text">${escapeCell(err.message)}</div>`;
+          statusEl.textContent = '加载失败';
+        });
+      });
     });
 
     filter.addEventListener('input', render);

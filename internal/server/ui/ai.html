@@ -189,6 +189,73 @@
       color: var(--warn);
       line-height: 1.45;
     }
+    .privacy-option {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 9px 10px;
+      border: 1px solid #c7d7ee;
+      border-radius: 4px;
+      background: #eef5fd;
+      color: #234c73;
+      line-height: 1.45;
+    }
+    .privacy-option input {
+      margin-top: 3px;
+    }
+    .preview-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 1000;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: rgba(18, 29, 43, 0.56);
+    }
+    .preview-overlay[hidden] {
+      display: none;
+    }
+    .preview-dialog {
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr) auto;
+      width: min(1080px, 96vw);
+      height: min(760px, 90vh);
+      overflow: hidden;
+      border: 1px solid #8194aa;
+      border-radius: 6px;
+      background: #fff;
+      box-shadow: 0 18px 50px rgba(16, 31, 48, 0.28);
+    }
+    .preview-dialog h2 {
+      margin: 0;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      font-size: 17px;
+    }
+    .preview-meta {
+      padding: 9px 16px;
+      border-bottom: 1px solid var(--line-soft);
+      background: #fff7e8;
+      color: #704315;
+    }
+    .preview-content {
+      width: 100%;
+      height: 100%;
+      min-height: 0;
+      resize: none;
+      border: 0;
+      border-radius: 0;
+      padding: 14px 16px;
+      background: #f8fafc;
+      font: 12px/1.5 Consolas, "Microsoft YaHei UI", monospace;
+    }
+    .preview-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      padding: 10px 16px;
+      border-top: 1px solid var(--line);
+    }
     .status {
       color: var(--muted);
       font-size: 13px;
@@ -352,7 +419,7 @@
     }
   </style>
   <link rel="stylesheet" href="/nav.css">
-  <script src="/app.js" defer></script>
+  <script src="/app.js"></script>
 </head>
 <body>
   <header>
@@ -369,12 +436,12 @@
       <nav class="top-nav" aria-label="主要功能">
         <a class="nav-link" href="/">进程信息</a>
         <a class="nav-link" href="/host.html">主机信息</a>
-        <a class="nav-link" href="/findings.html">关注项</a>
+        <a class="nav-link" href="/findings.html">风险线索</a>
         <a class="nav-link" href="/threat.html">威胁分析</a>
+        <a class="nav-link" href="/investigation.html">案件调查</a>
         <a class="nav-link" href="/filetrace.html">文件痕迹</a>
         <a class="nav-link" href="/history.html">历史通信</a>
         <a class="nav-link" href="/security.html">事件日志</a>
-        <a class="nav-link" href="/health.html">日志健康</a>
         <a class="nav-link" href="/yara.html">YARA扫描</a>
         <a class="nav-link" aria-current="page" href="/ai.html">AI分析</a>
       </nav>
@@ -388,7 +455,7 @@
           <span>分析配置</span>
         </div>
         <div class="panel-body">
-          <div class="notice">在线 AI 会接收所选模块摘要；API Key 只用于本次请求，不写入本机配置。</div>
+          <div class="notice">公有云 AI 会接收预览窗口中确认的内容。企业现场建议优先使用自定义厂商连接内网私有模型。</div>
 
           <div class="grid-2">
             <label class="field">AI厂商
@@ -417,6 +484,11 @@
             <input id="base-url" placeholder="OpenAI-compatible base URL">
           </label>
 
+          <label class="privacy-option">
+            <input id="redact-sensitive" type="checkbox" checked>
+            <span>发送前基础脱敏（推荐）：替换内网 IP、用户目录、UNC 主机名和域账户标识。发送前仍会显示完整预览。</span>
+          </label>
+
           <div class="grid-2">
             <label class="field">每个模块最多发送
               <select id="max-items">
@@ -438,14 +510,14 @@
 
           <div class="module-grid">
             <label class="check"><input type="checkbox" name="section" value="processes" checked>进程信息</label>
-            <label class="check"><input type="checkbox" name="section" value="findings" checked>关注项</label>
-            <label class="check"><input type="checkbox" name="section" value="behavior" checked>行为关联</label>
-            <label class="check"><input type="checkbox" name="section" value="loghealth" checked>日志健康</label>
+            <label class="check"><input type="checkbox" name="section" value="risk" checked>风险线索</label>
+            <label class="check"><input type="checkbox" name="section" value="drivers" checked>内核驱动风险</label>
+            <label class="check"><input type="checkbox" name="section" value="security" checked>事件日志/日志健康</label>
             <label class="check"><input type="checkbox" name="section" value="host">主机信息</label>
             <label class="check"><input type="checkbox" name="section" value="memory">内存异常</label>
             <label class="check"><input type="checkbox" name="section" value="filetrace">文件痕迹</label>
             <label class="check"><input type="checkbox" name="section" value="history">历史通信</label>
-            <label class="check"><input type="checkbox" name="section" value="security">事件日志</label>
+            <label class="check"><input type="checkbox" name="section" value="investigation">案件时间线/实体</label>
           </div>
 
           <label class="field">分析目标
@@ -478,6 +550,18 @@
     </div>
   </main>
 
+  <div id="preview-overlay" class="preview-overlay" hidden>
+    <section class="preview-dialog" role="dialog" aria-modal="true" aria-labelledby="preview-title">
+      <h2 id="preview-title">确认发送给 AI 的内容</h2>
+      <div id="preview-meta" class="preview-meta"></div>
+      <textarea id="preview-content" class="preview-content" readonly></textarea>
+      <div class="preview-actions">
+        <button id="preview-cancel" class="secondary">取消</button>
+        <button id="preview-confirm">确认并发送</button>
+      </div>
+    </section>
+  </div>
+
   <script>
     const providerEl = document.getElementById('provider');
     const modelEl = document.getElementById('model');
@@ -498,6 +582,12 @@
     const followUpEl = document.getElementById('follow-up');
     const sendFollowBtn = document.getElementById('send-follow');
     const resultMetaEl = document.getElementById('result-meta');
+    const redactSensitiveEl = document.getElementById('redact-sensitive');
+    const previewOverlayEl = document.getElementById('preview-overlay');
+    const previewMetaEl = document.getElementById('preview-meta');
+    const previewContentEl = document.getElementById('preview-content');
+    const previewConfirmEl = document.getElementById('preview-confirm');
+    const previewCancelEl = document.getElementById('preview-cancel');
 
     const providers = {
       openai: {
@@ -527,8 +617,10 @@
     let lastTranscript = '';
     let lastSummaryData = null;
     let apiKeys = {};
+    let savedAPIKeys = {};
     let restoringSession = false;
     let saveTimer = null;
+    let previewResolver = null;
 
     function text(value) {
       return value == null ? '' : String(value);
@@ -564,6 +656,9 @@
       baseUrlEl.value = config.baseUrl;
       updateCustomModel();
       apiKeyEl.value = apiKeys[providerEl.value] || '';
+      apiKeyEl.placeholder = savedAPIKeys[providerEl.value]
+        ? '本次运行已保存；留空将继续使用'
+        : '输入当前厂商的 API Key';
     }
 
     function updateCustomModel() {
@@ -580,6 +675,7 @@
       baseUrlEl.disabled = value;
       maxItemsEl.disabled = value;
       timeoutEl.disabled = value;
+      redactSensitiveEl.disabled = value;
       questionEl.disabled = value;
       document.querySelectorAll('input[name="section"]').forEach(item => item.disabled = value);
       followUpEl.disabled = value || chatHistory.length === 0;
@@ -681,7 +777,8 @@
         sections: selectedSections(),
         question: questionEl.value,
         maxItems: Number(maxItemsEl.value),
-        timeout: Number(timeoutEl.value)
+        timeout: Number(timeoutEl.value),
+        redactionMode: redactSensitiveEl.checked ? 'basic' : 'none'
       };
     }
 
@@ -717,6 +814,7 @@
         if (settings.baseUrl) baseUrlEl.value = settings.baseUrl;
         if (settings.maxItems) maxItemsEl.value = String(settings.maxItems);
         if (settings.timeout) timeoutEl.value = String(settings.timeout);
+        redactSensitiveEl.checked = settings.redactionMode !== 'none';
         if (settings.question) questionEl.value = settings.question;
         if (Array.isArray(settings.sections) && settings.sections.length) {
           const selected = new Set(settings.sections);
@@ -761,9 +859,10 @@
         const res = await fetch('/api/ai/session', { cache: 'no-store' });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const state = await res.json();
-        apiKeys = state.apiKeys || {};
+        apiKeys = {};
+        savedAPIKeys = state.savedApiKeys || {};
         applySettings(state.settings);
-        apiKeyEl.value = apiKeys[providerEl.value] || '';
+        apiKeyEl.value = '';
         chatHistory = Array.isArray(state.messages) ? state.messages : [];
         lastSummaryData = state.summary && state.summary.generatedAt ? state.summary : null;
         summaryEl.innerHTML = '';
@@ -788,8 +887,41 @@
         apiKey: apiKeyEl.value.trim(),
         baseUrl: baseUrlEl.value.trim(),
         maxItems: Number(maxItemsEl.value),
-        timeoutSeconds: Number(timeoutEl.value)
+        timeoutSeconds: Number(timeoutEl.value),
+        redactionMode: redactSensitiveEl.checked ? 'basic' : 'none'
       };
+    }
+
+    function confirmPreview(data) {
+      previewContentEl.value = data.content || '';
+      previewMetaEl.textContent = `${data.redactionMode === 'basic' ? '已启用基础脱敏' : '未启用脱敏'} · ${data.promptBytes || 0} bytes · 请核对后确认`;
+      previewOverlayEl.hidden = false;
+      previewContentEl.scrollTop = 0;
+      return new Promise(resolve => {
+        previewResolver = resolve;
+        const finish = value => {
+          previewOverlayEl.hidden = true;
+          previewConfirmEl.onclick = null;
+          previewCancelEl.onclick = null;
+          previewResolver = null;
+          resolve(value);
+        };
+        previewConfirmEl.onclick = () => finish(true);
+        previewCancelEl.onclick = () => finish(false);
+      });
+    }
+
+    async function createPreview(body) {
+      statusEl.textContent = '正在采集并生成脱敏预览';
+      const res = await fetch('/api/ai/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify(body)
+      });
+      const raw = await res.text();
+      if (!res.ok) throw new Error(raw || `HTTP ${res.status}`);
+      return JSON.parse(raw);
     }
 
     async function sendMessage(question, withEvidence) {
@@ -797,7 +929,7 @@
       const apiKey = apiKeyEl.value.trim();
       const model = selectedModel();
       question = text(question).trim();
-      if (!apiKey) {
+      if (!apiKey && !savedAPIKeys[providerEl.value]) {
         statusEl.textContent = '请输入 API Key';
         apiKeyEl.focus();
         return;
@@ -818,18 +950,29 @@
       controller = new AbortController();
       setBusy(true);
       resultMetaEl.textContent = '';
-      statusEl.textContent = withEvidence ? '采集并分析中' : '追问中';
-
       const pendingHistory = withEvidence
         ? [{ role: 'user', content: question }]
         : [...chatHistory, { role: 'user', content: question }];
-      chatHistory = [...pendingHistory, { role: 'assistant', content: '正在等待 AI 返回...' }];
-      renderChat();
 
       try {
-        const body = withEvidence
+        let body = withEvidence
           ? { ...payloadBase(), sections, question }
           : { ...payloadBase(), messages: pendingHistory, includeEvidence: false };
+        if (withEvidence) {
+          const preview = await createPreview(body);
+          const confirmed = await confirmPreview(preview);
+          if (!confirmed) {
+            statusEl.textContent = '已取消发送';
+            return;
+          }
+          body = { ...body, previewId: preview.previewId };
+        }
+        statusEl.textContent = withEvidence ? '已确认，正在请求 AI' : '追问中';
+        chatHistory = [...pendingHistory, { role: 'assistant', content: '正在等待 AI 返回...' }];
+        renderChat();
+        if (!withEvidence) {
+          body = { ...payloadBase(), messages: pendingHistory, includeEvidence: false };
+        }
         const res = await fetch('/api/ai/analyze', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -883,6 +1026,14 @@
       if (controller) {
         controller.abort();
       }
+      if (previewResolver) {
+        const resolve = previewResolver;
+        previewResolver = null;
+        previewOverlayEl.hidden = true;
+        previewConfirmEl.onclick = null;
+        previewCancelEl.onclick = null;
+        resolve(false);
+      }
     }
 
     async function copyResult() {
@@ -917,6 +1068,7 @@
     baseUrlEl.addEventListener('input', scheduleSaveSession);
     maxItemsEl.addEventListener('change', scheduleSaveSession);
     timeoutEl.addEventListener('change', scheduleSaveSession);
+    redactSensitiveEl.addEventListener('change', scheduleSaveSession);
     questionEl.addEventListener('input', scheduleSaveSession);
     document.querySelectorAll('input[name="section"]').forEach(item => item.addEventListener('change', scheduleSaveSession));
     analyzeBtn.addEventListener('click', analyze);

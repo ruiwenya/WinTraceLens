@@ -47,7 +47,7 @@
     }
     main {
       display: grid;
-      grid-template-rows: auto auto auto auto minmax(0, 1fr);
+      grid-template-rows: auto auto auto auto auto minmax(0, 1fr);
       gap: 10px;
       height: calc(100vh - 48px);
       padding: 12px;
@@ -120,6 +120,19 @@
       color: #26384f;
       white-space: nowrap;
     }
+    .scope-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      min-width: 0;
+      flex-wrap: wrap;
+    }
+    #amcache-path {
+      flex: 1 1 480px;
+      width: auto;
+      min-width: 260px;
+    }
     .badge {
       display: inline-flex;
       align-items: center;
@@ -137,12 +150,33 @@
     .badge.bad { border-color: #edb4bd; background: #fff0f2; color: var(--bad); }
     .badge.info { border-color: #c7d7ee; background: #eef5fd; color: var(--info); }
     .panel {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
       min-height: 0;
       border: 1px solid var(--line);
       border-radius: 4px;
       background: var(--panel);
       overflow: hidden;
     }
+    .evidence-note {
+      padding: 8px 12px;
+      border-bottom: 1px solid #c7d7ee;
+      background: #eef5fd;
+      color: #294e78;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .evidence-note[hidden] { display: none; }
+    .operation-notices {
+      padding: 8px 12px;
+      border: 1px solid #c7d7ee;
+      border-radius: 4px;
+      background: #eef5fd;
+      color: #294e78;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .operation-notices[hidden] { display: none; }
     .table-wrap {
       height: 100%;
       overflow: auto;
@@ -169,6 +203,9 @@
       color: #26384f;
       font-weight: 650;
     }
+    th.sortable { cursor: pointer; user-select: none; }
+    th.sortable:hover { background: #dfeaf4; }
+    .sort-mark { color: var(--accent); }
     tbody tr:hover td { background: #f3f8ff; }
     tbody tr.high td { background: #fff0f2; }
     tbody tr.medium td { background: #fff9ed; }
@@ -181,6 +218,11 @@
     .path { width: 420px; }
     .reason { width: 260px; }
     .details { width: 260px; }
+    .hash { width: 290px; }
+    .publisher { width: 240px; }
+    .product { width: 220px; }
+    .association { width: 130px; }
+    .schema { width: 96px; }
     .empty {
       padding: 18px;
       color: var(--muted);
@@ -188,7 +230,7 @@
     .bad { color: var(--bad); }
   </style>
   <link rel="stylesheet" href="/nav.css">
-  <script src="/app.js" defer></script>
+  <script src="/app.js"></script>
 </head>
 <body>
   <header>
@@ -205,12 +247,12 @@
       <nav class="top-nav" aria-label="主要功能">
         <a class="nav-link" href="/">进程信息</a>
         <a class="nav-link" href="/host.html">主机信息</a>
-        <a class="nav-link" href="/findings.html">关注项</a>
+        <a class="nav-link" href="/findings.html">风险线索</a>
         <a class="nav-link" href="/threat.html">威胁分析</a>
+        <a class="nav-link" href="/investigation.html">案件调查</a>
         <a class="nav-link" aria-current="page" href="/filetrace.html">文件痕迹</a>
         <a class="nav-link" href="/history.html">历史通信</a>
         <a class="nav-link" href="/security.html">事件日志</a>
-        <a class="nav-link" href="/health.html">日志健康</a>
         <a class="nav-link" href="/yara.html">YARA扫描</a>
         <a class="nav-link" href="/ai.html">AI分析</a>
       </nav>
@@ -229,16 +271,25 @@
       </select>
       <button id="refresh">刷新文件痕迹</button>
       <button id="export-csv" class="secondary" disabled>导出 CSV</button>
-      <input id="filter" placeholder="按文件名、路径、来源、可疑原因过滤">
+      <input id="filter" placeholder="按文件名、路径、来源过滤；支持 /正则/i、re:正则">
       <span id="status" class="status">尚未加载</span>
     </div>
 
     <div class="scopebar">
-      <label for="modified-roots">最近修改扫描目录</label>
-      <textarea id="modified-roots" placeholder="默认扫描 Downloads、Desktop、AppData、ProgramData；也可输入 C:\、D:\ 或 C:\Windows，每行一个目录"></textarea>
-      <button id="pick-modified-root" class="secondary">选择目录</button>
-      <button id="clear-modified-roots" class="secondary">恢复默认</button>
-      <span id="scope-note" class="status">默认扫描常见落地点</span>
+      <div class="scope-row">
+        <label for="modified-roots">最近修改扫描目录</label>
+        <textarea id="modified-roots" placeholder="默认扫描 Downloads、Desktop、AppData、ProgramData；也可输入 C:\、D:\ 或 C:\Windows，每行一个目录"></textarea>
+        <button id="pick-modified-root" class="secondary">选择目录</button>
+        <button id="clear-modified-roots" class="secondary">恢复默认</button>
+        <span id="scope-note" class="status">默认扫描常见落地点</span>
+      </div>
+      <div class="scope-row">
+        <label for="amcache-path">Amcache Hive</label>
+        <input id="amcache-path" placeholder="留空读取本机 %SystemRoot%\AppCompat\Programs\Amcache.hve；也可选择离线 Hive">
+        <button id="pick-amcache" class="secondary">选择 Hive</button>
+        <button id="clear-amcache" class="secondary">使用本机默认</button>
+        <span id="amcache-scope-note" class="status">当前读取本机默认 Hive</span>
+      </div>
     </div>
 
     <div class="tabs">
@@ -246,12 +297,26 @@
       <button class="tab" data-tab="suspicious" data-label="可疑项">可疑项</button>
       <button class="tab" data-tab="modified" data-label="最近修改">最近修改</button>
       <button class="tab" data-tab="run" data-label="最近运行">最近运行</button>
+      <button class="tab" data-tab="artifacts" data-label="传统取证">传统取证</button>
       <button class="tab" data-tab="temp" data-label="Temp 文件">Temp 文件</button>
+      <select id="artifact-source" title="按传统取证源筛选">
+        <option value="">全部取证源</option>
+        <option value="ntfs">MFT / USN</option>
+        <option value="prefetch">Prefetch</option>
+        <option value="amcache">Amcache</option>
+        <option value="shimcache">Shimcache</option>
+        <option value="srum">SRUM</option>
+        <option value="lnk">LNK / JumpList</option>
+        <option value="userassist">UserAssist / PCA</option>
+        <option value="powershell">PowerShell 历史</option>
+      </select>
     </div>
 
     <div id="summary" class="summary"></div>
+    <div id="operation-notices" class="operation-notices" hidden></div>
 
     <section class="panel">
+      <div id="amcache-note" class="evidence-note" hidden>Amcache 用于证明系统曾记录过文件及其元数据，不能单独证明文件已经执行。表中时间统一按“记录/扫描发现时间”解释；缓存 SHA1 不是当前文件的实时完整哈希，提交威胁情报前应再核验当前文件。</div>
       <div id="table" class="table-wrap">
         <div class="empty">正在加载文件痕迹...</div>
       </div>
@@ -263,6 +328,7 @@
     const filter = document.getElementById('filter');
     const statusEl = document.getElementById('status');
     const summaryEl = document.getElementById('summary');
+    const noticesEl = document.getElementById('operation-notices');
     const exportCSV = document.getElementById('export-csv');
     const hoursEl = document.getElementById('hours');
     const maxRecords = document.getElementById('max-records');
@@ -270,9 +336,18 @@
     const pickModifiedRoot = document.getElementById('pick-modified-root');
     const clearModifiedRoots = document.getElementById('clear-modified-roots');
     const scopeNote = document.getElementById('scope-note');
+    const artifactSource = document.getElementById('artifact-source');
+    const amcachePath = document.getElementById('amcache-path');
+    const pickAmcache = document.getElementById('pick-amcache');
+    const clearAmcache = document.getElementById('clear-amcache');
+    const amcacheScopeNote = document.getElementById('amcache-scope-note');
+    const amcacheNote = document.getElementById('amcache-note');
     let records = [];
     let collectionErrors = [];
+    let notices = [];
     let activeTab = 'all';
+    let genericSort = { key: 'modified', direction: 'desc' };
+    let amcacheSort = { key: 'evidenceTime', direction: 'desc' };
 
     function text(value) {
       return value == null ? '' : String(value);
@@ -284,21 +359,84 @@
       }[ch]));
     }
 
+    function isArtifactRecord(item) {
+      return ['执行痕迹', '命令历史', 'NTFS 元数据', 'NTFS 变更痕迹', '网络与应用痕迹', '取证源状态'].includes(item.category)
+        || item.source === 'Prefetch'
+        || item.source === 'Recent 快捷方式';
+    }
+
     function tabMatches(item) {
       if (activeTab === 'modified') return item.category === '最近修改文件';
       if (activeTab === 'run') return item.category === '最近运行文件';
+      if (activeTab === 'artifacts') return isArtifactRecord(item);
       if (activeTab === 'temp') return item.category === 'Temp 临时文件';
       if (activeTab === 'suspicious') return !!item.suspicion;
       return true;
     }
 
+    function sourceMatches(item) {
+      const source = text(item.source).toLowerCase();
+      if (!artifactSource.value) return true;
+      if (artifactSource.value === 'ntfs') return source.includes('mft') || source.includes('usn');
+      if (artifactSource.value === 'prefetch') return source.includes('prefetch');
+      if (artifactSource.value === 'amcache') return source.includes('amcache');
+      if (artifactSource.value === 'shimcache') return source.includes('shimcache');
+      if (artifactSource.value === 'srum') return source.includes('srum');
+      if (artifactSource.value === 'lnk') return source.includes('recent') || source.includes('jumplist');
+      if (artifactSource.value === 'userassist') return source.includes('userassist') || source.includes('pca');
+      if (artifactSource.value === 'powershell') return source.includes('powershell');
+      return true;
+    }
+
     function visibleItems() {
-      const q = filter.value.trim().toLowerCase();
-      return records.filter(item => {
+      const q = filter.value.trim();
+      const items = records.filter(item => {
         if (!tabMatches(item)) return false;
+        if (!sourceMatches(item)) return false;
         if (!q) return true;
-        return Object.values(item).some(v => text(v).toLowerCase().includes(q));
+        return window.wtlMatchesQuery(q, Object.values(item));
       });
+      if (artifactSource.value !== 'amcache') return sortItems(items, genericSort, genericSortValue);
+      return sortItems(items, amcacheSort, amcacheSortValue);
+    }
+
+    function sortItems(items, state, valueOf) {
+      const direction = state.direction === 'asc' ? 1 : -1;
+      return [...items].sort((a, b) => {
+        const av = valueOf(a, state.key);
+        const bv = valueOf(b, state.key);
+        const aEmpty = av === '' || av == null;
+        const bEmpty = bv === '' || bv == null;
+        if (aEmpty && !bEmpty) return 1;
+        if (!aEmpty && bEmpty) return -1;
+        if (av < bv) return -1 * direction;
+        if (av > bv) return 1 * direction;
+        return text(a.name).localeCompare(text(b.name), 'zh-CN');
+      });
+    }
+
+    function genericSortValue(item, key) {
+      if (key === 'size') return item.size ? Number(item.size) : '';
+      if (key === 'suspicion') return ({ '高': 3, '中': 2, '低': 1 }[item.suspicion] || 0);
+      return text(item[key]).toLowerCase();
+    }
+
+    function amcacheSortValue(item, key) {
+      if (key === 'size') return Number(item.size || 0);
+      if (key === 'suspicion') return ({ '高': 3, '中': 2, '低': 1 }[item.suspicion] || 0);
+      return text(item[key]).toLowerCase();
+    }
+
+    function amcacheHeader(label, key, className) {
+      const active = amcacheSort.key === key;
+      const mark = active ? (amcacheSort.direction === 'asc' ? ' ↑' : ' ↓') : '';
+      return `<th class="${className || ''} sortable" data-amcache-sort="${key}" title="单击按${escapeCell(label)}排序">${escapeCell(label)}<span class="sort-mark">${mark}</span></th>`;
+    }
+
+    function genericHeader(label, key, className) {
+      const active = genericSort.key === key;
+      const mark = active ? (genericSort.direction === 'asc' ? ' ↑' : ' ↓') : '';
+      return `<th class="${className || ''} sortable" data-generic-sort="${key}" title="单击按${escapeCell(label)}排序">${escapeCell(label)}<span class="sort-mark">${mark}</span></th>`;
     }
 
     function countFor(tab) {
@@ -362,6 +500,11 @@
       const modified = records.filter(x => x.category === '最近修改文件').length;
       const run = records.filter(x => x.category === '最近运行文件').length;
       const temp = records.filter(x => x.category === 'Temp 临时文件').length;
+      const artifacts = records.filter(isArtifactRecord).length;
+      const usn = records.filter(x => x.source === 'USN Journal').length;
+      const amcache = records.filter(x => x.source === 'Amcache Hive').length;
+      const prefetch = records.filter(x => x.source === 'Prefetch').length;
+      const powershell = records.filter(x => x.source === 'PowerShell PSReadLine').length;
       const suspicious = records.filter(x => x.suspicion).length;
       const errors = collectionErrors.map(x => `<span class="bad" title="${escapeCell(x)}">${escapeCell(x)}</span>`).join('');
       summaryEl.innerHTML = [
@@ -369,26 +512,24 @@
         `<span class="badge warn">可疑 ${suspicious}</span>`,
         `<span class="badge info">最近修改 ${modified}</span>`,
         `<span class="badge info">最近运行 ${run}</span>`,
+        `<span class="badge info">执行痕迹 ${artifacts}</span>`,
+        `<span class="badge info">Prefetch ${prefetch}</span>`,
+        `<span class="badge info">PowerShell 历史 ${powershell}</span>`,
+        `<span class="badge info">USN ${usn}</span>`,
+        `<span class="badge info">Amcache ${amcache}</span>`,
         `<span class="badge info">Temp ${temp}</span>`,
         errors
       ].join('');
+      noticesEl.hidden = notices.length === 0;
+      noticesEl.innerHTML = notices.map(x => `<div>${escapeCell(x)}</div>`).join('');
     }
 
-    function render() {
-      updateTabs();
-      renderSummary();
-      const items = visibleItems();
-      const tabTotal = records.filter(tabMatches).length;
-      statusEl.textContent = `显示 ${items.length} / ${tabTotal}`;
-      if (!items.length) {
-        table.innerHTML = '<div class="empty">没有匹配的文件痕迹</div>';
-        return;
-      }
+    function renderGenericTable(items) {
       table.innerHTML = `<table>
         <thead><tr>
-          <th class="category">分类</th><th class="source">来源</th><th class="risk">可疑</th><th class="name">文件名</th>
-          <th class="time">修改时间</th><th class="time">最近运行</th><th class="time">创建时间</th><th class="size">大小</th>
-          <th class="path">路径</th><th class="reason">原因</th><th class="details">详情</th>
+          ${genericHeader('分类', 'category', 'category')}${genericHeader('来源', 'source', 'source')}${genericHeader('可疑', 'suspicion', 'risk')}${genericHeader('文件名', 'name', 'name')}
+          ${genericHeader('修改时间', 'modified', 'time')}${genericHeader('最近运行', 'lastRun', 'time')}${genericHeader('创建时间', 'created', 'time')}${genericHeader('大小', 'size', 'size')}
+          ${genericHeader('路径', 'path', 'path')}${genericHeader('原因', 'reason', 'reason')}${genericHeader('详情', 'details', 'details')}
         </tr></thead>
         <tbody>${items.map(item => `<tr class="${rowClass(item)}">
           <td class="category" title="${escapeCell(item.category)}">${escapeCell(item.category)}</td>
@@ -406,6 +547,62 @@
       </table>`;
     }
 
+    function renderAmcacheTable(items) {
+      table.innerHTML = `<table style="min-width: 3000px">
+        <thead><tr>
+          ${amcacheHeader('风险', 'suspicion', 'risk')}${amcacheHeader('Schema', 'schema', 'schema')}${amcacheHeader('文件名', 'name', 'name')}
+          ${amcacheHeader('SHA1', 'sha1', 'hash')}${amcacheHeader('Publisher', 'publisher', 'publisher')}${amcacheHeader('产品', 'productName', 'product')}
+          ${amcacheHeader('产品版本', 'productVersion', 'product')}${amcacheHeader('BinaryType', 'binaryType', 'source')}${amcacheHeader('应用关联', 'association', 'association')}
+          ${amcacheHeader('ProgramId', 'programId', 'hash')}${amcacheHeader('记录/扫描发现时间', 'evidenceTime', 'time')}${amcacheHeader('PE 链接时间', 'linkDate', 'time')}
+          ${amcacheHeader('当前签名', 'signature', 'source')}${amcacheHeader('大小', 'size', 'size')}${amcacheHeader('路径', 'path', 'path')}
+          ${amcacheHeader('原因', 'reason', 'reason')}<th class="details">详情/时间语义</th>
+        </tr></thead>
+        <tbody>${items.map(item => `<tr class="${rowClass(item)}">
+          <td class="risk">${riskBadge(item.suspicion)}</td>
+          <td class="schema">${escapeCell(item.schema)}</td>
+          <td class="name" title="${escapeCell(item.name)}">${escapeCell(item.name)}</td>
+          <td class="hash" title="${escapeCell(item.sha1)}">${escapeCell(item.sha1)}</td>
+          <td class="publisher" title="${escapeCell(item.publisher)}">${escapeCell(item.publisher)}</td>
+          <td class="product" title="${escapeCell(item.productName)}">${escapeCell(item.productName)}</td>
+          <td class="product" title="${escapeCell(item.productVersion)}">${escapeCell(item.productVersion)}</td>
+          <td class="source" title="${escapeCell(item.binaryType)}">${escapeCell(item.binaryType)}</td>
+          <td class="association" title="${escapeCell(item.association)}">${escapeCell(item.association)}</td>
+          <td class="hash" title="${escapeCell(item.programId)}">${escapeCell(item.programId)}</td>
+          <td class="time" title="${escapeCell(item.timeMeaning)}">${escapeCell(item.evidenceTime)}</td>
+          <td class="time" title="${escapeCell(item.linkDate)}">${escapeCell(item.linkDate)}</td>
+          <td class="source" title="${escapeCell(item.signatureMsg)}">${escapeCell(item.signature)}</td>
+          <td class="size" title="${escapeCell(item.size)}">${escapeCell(formatSize(item.size))}</td>
+          <td class="path" title="${escapeCell(item.path)}">${escapeCell(item.path)}</td>
+          <td class="reason" title="${escapeCell(item.reason)}">${escapeCell(item.reason)}</td>
+          <td class="details" title="${escapeCell([item.details, item.timeMeaning, item.signatureMsg].filter(Boolean).join('；'))}">${escapeCell([item.details, item.timeMeaning, item.signatureMsg].filter(Boolean).join('；'))}</td>
+        </tr>`).join('')}</tbody>
+      </table>`;
+    }
+
+    function renderContent() {
+      updateTabs();
+      renderSummary();
+      amcacheNote.hidden = artifactSource.value !== 'amcache';
+      const items = visibleItems();
+      const tabTotal = records.filter(tabMatches).length;
+      statusEl.textContent = `显示 ${items.length} / ${tabTotal}`;
+      if (!items.length) {
+        table.innerHTML = '<div class="empty">没有匹配的文件痕迹</div>';
+        return;
+      }
+      if (artifactSource.value === 'amcache') renderAmcacheTable(items);
+      else renderGenericTable(items);
+    }
+
+    function render() {
+      try {
+        renderContent();
+      } catch (err) {
+        table.innerHTML = `<div class="empty bad">${escapeCell(err.message || err)}</div>`;
+        statusEl.textContent = '搜索条件无效';
+      }
+    }
+
     async function loadJSON(url, options) {
       const res = await fetch(url, options || { cache: 'no-store' });
       if (!res.ok) throw new Error(await res.text() || res.statusText);
@@ -419,44 +616,55 @@
       return data.ok ? data.path : '';
     }
 
-    function queryString(includeFilter) {
+    async function chooseFile(title) {
+      const params = new URLSearchParams({ title });
+      const data = await loadJSON(`/api/dialog/file?${params}`);
+      if (data.error) throw new Error(data.error);
+      return data.ok ? data.path : '';
+    }
+
+    function queryString(includeFilter, refresh) {
       const params = new URLSearchParams({
         max: maxRecords.value || '500',
         hours: hoursEl.value || '72',
         category: activeTab
       });
       splitRoots(modifiedRoots.value).forEach(root => params.append('root', root));
+      if (amcachePath.value.trim()) params.set('amcache_path', amcachePath.value.trim());
       const q = filter.value.trim();
       if (includeFilter && q) params.set('q', q);
+      if (refresh) params.set('refresh', '1');
       return params.toString();
     }
 
     function downloadCSV(url) {
-      const a = document.createElement('a');
-      a.href = url;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
+      window.wtlDownload(url).catch(err => {
+        statusEl.textContent = `导出失败：${err.message || err}`;
+      });
     }
 
-    async function load() {
+    async function load(refresh = false) {
       statusEl.textContent = '正在采集文件痕迹...';
       exportCSV.disabled = true;
       summaryEl.innerHTML = '';
+      notices = [];
+      noticesEl.hidden = true;
+      noticesEl.innerHTML = '';
       const roots = splitRoots(modifiedRoots.value);
       table.innerHTML = roots.length
-        ? `<div class="empty">正在扫描自定义目录的最近修改文件，并采集 Temp、Prefetch 和 Recent 快捷方式...</div>`
-        : '<div class="empty">正在扫描 Temp、Downloads、Desktop、Prefetch 和 Recent 快捷方式...</div>';
-      const data = await loadJSON(`/api/files/traces?${queryString(false)}`);
+        ? `<div class="empty">正在扫描自定义目录，并采集 MFT/USN、Prefetch、Amcache、Shimcache、SRUM、LNK/JumpList、UserAssist 和 PowerShell 历史...</div>`
+        : '<div class="empty">正在采集 MFT/USN、Prefetch、Amcache、Shimcache、SRUM、LNK/JumpList、UserAssist 和 PowerShell 历史...</div>';
+      const data = await loadJSON(`/api/files/traces?${queryString(false, refresh)}`);
       records = data.records || [];
       collectionErrors = data.collectionErrors || [];
+      notices = data.notices || [];
       exportCSV.disabled = false;
       statusEl.textContent = `生成时间 ${data.generatedAt || ''}，记录 ${records.length}`;
       render();
     }
 
     document.getElementById('refresh').addEventListener('click', () => {
-      load().catch(err => {
+      load(true).catch(err => {
         table.innerHTML = `<div class="empty bad">${escapeCell(err.message)}</div>`;
         statusEl.textContent = '加载失败';
       });
@@ -487,18 +695,61 @@
     });
 
     modifiedRoots.addEventListener('input', updateScopeNote);
+    amcachePath.addEventListener('input', updateAmcacheScopeNote);
+    pickAmcache.addEventListener('click', async () => {
+      try {
+        const path = await chooseFile('选择离线 Amcache.hve');
+        if (!path) return;
+        amcachePath.value = path;
+        updateAmcacheScopeNote();
+        activeTab = 'artifacts';
+        artifactSource.value = 'amcache';
+        await load(true);
+      } catch (err) {
+        statusEl.textContent = err.message;
+      }
+    });
+    clearAmcache.addEventListener('click', () => {
+      amcachePath.value = '';
+      updateAmcacheScopeNote();
+      load(true).catch(err => {
+        table.innerHTML = `<div class="empty bad">${escapeCell(err.message)}</div>`;
+        statusEl.textContent = '加载失败';
+      });
+    });
     exportCSV.addEventListener('click', () => {
       statusEl.textContent = '正在生成 CSV...';
-      downloadCSV(`/api/files/traces.csv?${queryString(true)}`);
+      downloadCSV(`/api/files/traces.csv?${queryString(true, false)}`);
     });
 
     document.querySelectorAll('button.tab').forEach(btn => {
       btn.addEventListener('click', () => {
         activeTab = btn.dataset.tab;
+        if (activeTab !== 'artifacts') artifactSource.value = '';
         render();
       });
     });
     filter.addEventListener('input', render);
+    artifactSource.addEventListener('change', () => {
+      if (artifactSource.value) activeTab = 'artifacts';
+      render();
+    });
+    table.addEventListener('click', event => {
+      const amcacheHeader = event.target.closest('[data-amcache-sort]');
+      if (amcacheHeader) {
+        const key = amcacheHeader.dataset.amcacheSort;
+        if (amcacheSort.key === key) amcacheSort.direction = amcacheSort.direction === 'asc' ? 'desc' : 'asc';
+        else amcacheSort = { key, direction: key === 'name' || key === 'publisher' ? 'asc' : 'desc' };
+        render();
+        return;
+      }
+      const genericHeader = event.target.closest('[data-generic-sort]');
+      if (!genericHeader) return;
+      const key = genericHeader.dataset.genericSort;
+      if (genericSort.key === key) genericSort.direction = genericSort.direction === 'asc' ? 'desc' : 'asc';
+      else genericSort = { key, direction: ['category', 'source', 'name', 'path', 'reason', 'details'].includes(key) ? 'asc' : 'desc' };
+      render();
+    });
     hoursEl.addEventListener('change', () => load().catch(err => {
       table.innerHTML = `<div class="empty bad">${escapeCell(err.message)}</div>`;
       statusEl.textContent = '加载失败';
@@ -508,7 +759,14 @@
       statusEl.textContent = '加载失败';
     }));
 
+    function updateAmcacheScopeNote() {
+      amcacheScopeNote.textContent = amcachePath.value.trim()
+        ? `离线 Hive：${amcachePath.value.trim()}`
+        : '当前读取本机默认 Hive';
+    }
+
     updateScopeNote();
+    updateAmcacheScopeNote();
     load().catch(err => {
       table.innerHTML = `<div class="empty bad">${escapeCell(err.message)}</div>`;
       statusEl.textContent = '加载失败';

@@ -1,0 +1,552 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WinTraceLens - 案件调查</title>
+  <style>
+    :root {
+      --bg: #f4f7fa;
+      --panel: #fff;
+      --line: #d7e0e9;
+      --line-soft: #edf1f5;
+      --text: #172235;
+      --muted: #5d697a;
+      --head: #243447;
+      --head-2: #edf3f8;
+      --accent: #1769aa;
+      --accent-dark: #0f4e82;
+      --ok: #176b43;
+      --warn: #985200;
+      --bad: #a41220;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+      letter-spacing: 0;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 13px 18px;
+      background: var(--head);
+      color: #fff;
+    }
+    h1 { margin: 0; font-size: 18px; font-weight: 650; }
+    main {
+      display: grid;
+      grid-template-rows: auto auto auto auto minmax(280px, 1fr);
+      gap: 10px;
+      height: calc(100vh - 48px);
+      min-height: 680px;
+      padding: 12px;
+    }
+    .toolbar, .casebar, .filterbar, .tabs, .summary, .coverage {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .casebar, .filterbar {
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+    }
+    input, select {
+      height: 34px;
+      padding: 6px 9px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: #fff;
+      color: var(--text);
+      font: inherit;
+    }
+    input[type="text"] { width: 210px; }
+    input[type="date"] { width: 150px; }
+    #case-scenario { width: 190px; }
+    #query { flex: 1 1 380px; min-width: 260px; }
+    label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: 34px;
+      padding: 0 12px;
+      border: 1px solid var(--accent-dark);
+      border-radius: 4px;
+      background: var(--accent);
+      color: #fff;
+      cursor: pointer;
+      font: inherit;
+    }
+    button.secondary, button.tab, button.pin {
+      border-color: var(--line);
+      background: #fff;
+      color: var(--text);
+    }
+    button.tab.active {
+      border-color: var(--accent);
+      background: #e8f2fb;
+      color: var(--accent-dark);
+    }
+    button.pin { height: 28px; padding: 0 8px; }
+    button:disabled { cursor: not-allowed; opacity: 0.5; }
+    .status { color: var(--muted); font-size: 13px; }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 26px;
+      padding: 4px 9px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fff;
+      color: var(--text);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .badge.ok { border-color: #b8d7c8; background: #edf8f2; color: var(--ok); }
+    .badge.warn { border-color: #edcc9d; background: #fff7e8; color: var(--warn); }
+    .badge.bad { border-color: #edb4bd; background: #fff0f2; color: var(--bad); }
+    .badge.info { border-color: #c7d7ee; background: #eef5fd; color: #2b5b91; }
+    .coverage { gap: 5px; }
+    .coverage button.badge {
+      height: 28px;
+      max-width: 280px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      cursor: pointer;
+    }
+    .coverage button.badge.active { box-shadow: inset 0 0 0 2px var(--accent); }
+    .panel {
+      min-width: 0;
+      min-height: 280px;
+      height: 100%;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel);
+      overflow: hidden;
+    }
+    .table-wrap { height: 100%; min-height: 0; overflow: auto; }
+    table {
+      width: 100%;
+      min-width: 1900px;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+    th, td {
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--line-soft);
+      text-align: left;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: var(--head-2);
+      color: #26384f;
+      font-weight: 650;
+    }
+    tbody tr:hover td { background: #f3f8ff; }
+    tbody tr.high td { background: #fff0f2; }
+    tbody tr.medium td { background: #fff9ed; }
+    .action { width: 70px; }
+    .time { width: 155px; }
+    .level { width: 80px; }
+    .score { width: 82px; }
+    .scenario { width: 260px; }
+    .group { width: 150px; }
+    .source { width: 160px; }
+    .category { width: 150px; }
+    .entity { width: 210px; }
+    .pid { width: 80px; }
+    .user { width: 160px; }
+    .remote { width: 190px; }
+    .path { width: 400px; }
+    .details { width: 420px; }
+    .empty { padding: 18px; color: var(--muted); }
+    .bad-text { color: var(--bad); }
+  </style>
+  <link rel="stylesheet" href="/nav.css">
+  <script src="/app.js"></script>
+</head>
+<body>
+  <header>
+    <h1>WinTraceLens</h1>
+    <div class="app-meta">
+      <span class="release-badge" data-app-version>基础版</span>
+      <span class="permission-badge unknown" data-admin-status>权限检测中</span>
+      <span class="module-title">案件时间线与全局实体搜索</span>
+    </div>
+  </header>
+
+  <main>
+    <div class="toolbar">
+      <nav class="top-nav" aria-label="主要功能">
+        <a class="nav-link" href="/">进程信息</a>
+        <a class="nav-link" href="/host.html">主机信息</a>
+        <a class="nav-link" href="/findings.html">风险线索</a>
+        <a class="nav-link" href="/threat.html">威胁分析</a>
+        <a class="nav-link" aria-current="page" href="/investigation.html">案件调查</a>
+        <a class="nav-link" href="/filetrace.html">文件痕迹</a>
+        <a class="nav-link" href="/history.html">历史通信</a>
+        <a class="nav-link" href="/security.html">事件日志</a>
+        <a class="nav-link" href="/yara.html">YARA扫描</a>
+        <a class="nav-link" href="/ai.html">AI分析</a>
+      </nav>
+      <span class="current-module">当前：案件调查</span>
+    </div>
+
+    <div class="casebar">
+      <label>调查场景<select id="case-scenario">
+        <option value="general">通用应急排查</option>
+        <option value="smb">445 / SMB 横向攻击</option>
+        <option value="mining">挖矿木马</option>
+        <option value="rat">远控木马</option>
+        <option value="worm">蠕虫传播</option>
+        <option value="account">账户入侵 / RDP</option>
+        <option value="powershell">PowerShell 攻击</option>
+        <option value="rootkit">Rootkit / 异常驱动</option>
+      </select></label>
+      <label>开始<input id="start" type="date"></label>
+      <label>结束<input id="end" type="date"></label>
+      <label>最大记录<select id="max-records"><option value="1000">1000</option><option value="1500" selected>1500</option><option value="3000">3000</option><option value="5000">5000</option></select></label>
+      <button id="collect">重新采集案件证据</button>
+      <button id="export" class="secondary" disabled>导出时间线 CSV</button>
+      <span id="status" class="status">切换调查场景会复用证据并重新评分</span>
+    </div>
+
+    <div>
+      <div class="tabs">
+        <button class="tab active" data-tab="focus">场景重点</button>
+        <button class="tab" data-tab="evidence">全部证据</button>
+        <button class="tab" data-tab="timeline">案件时间线</button>
+        <button class="tab" data-tab="search">全局搜索</button>
+        <button class="tab" data-tab="bookmarks">已收藏证据</button>
+      </div>
+      <div class="filterbar">
+        <input id="query" type="text" placeholder="搜索 PID、MD5、IP、域名、用户或路径；支持 /正则/i、re:正则">
+        <select id="source"><option value="">全部来源</option></select>
+        <select id="level"><option value="">全部级别</option><option value="高">高</option><option value="中">中</option><option value="低">低</option></select>
+        <button id="clear-group" class="secondary" hidden>清除证据组</button>
+        <button id="previous-page" class="secondary">上一页</button>
+        <button id="next-page" class="secondary">下一页</button>
+        <span id="page-status" class="status"></span>
+        <span id="view-status" class="status"></span>
+      </div>
+    </div>
+
+    <div>
+      <div id="summary" class="summary"></div>
+      <div id="coverage" class="coverage"></div>
+    </div>
+
+    <section class="panel">
+      <div id="table" class="table-wrap"><div class="empty">正在准备案件工作台...</div></div>
+    </section>
+  </main>
+
+  <script>
+    const table = document.getElementById('table');
+    const statusEl = document.getElementById('status');
+    const viewStatus = document.getElementById('view-status');
+    const summaryEl = document.getElementById('summary');
+    const coverageEl = document.getElementById('coverage');
+    const queryEl = document.getElementById('query');
+    const sourceEl = document.getElementById('source');
+    const levelEl = document.getElementById('level');
+    const previousPage = document.getElementById('previous-page');
+    const nextPage = document.getElementById('next-page');
+    const pageStatus = document.getElementById('page-status');
+    const startEl = document.getElementById('start');
+    const endEl = document.getElementById('end');
+    const maxRecords = document.getElementById('max-records');
+    const caseScenario = document.getElementById('case-scenario');
+    const exportButton = document.getElementById('export');
+    const clearGroupButton = document.getElementById('clear-group');
+    let activeTab = 'focus';
+    let groupFilter = '';
+    let currentPage = 0;
+    const pageSize = 100;
+    let snapshot = { timeline: [], entities: [], coverage: [], collectionErrors: [] };
+    let bookmarks = loadStored('wtl.case.bookmarks.v1', []);
+
+    function text(value) { return value == null ? '' : String(value); }
+    function escapeCell(value) {
+      return text(value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+    }
+    function loadStored(key, fallback) {
+      try { return JSON.parse(sessionStorage.getItem(key) || '') || fallback; } catch { return fallback; }
+    }
+    function saveCaseState() {
+      sessionStorage.setItem('wtl.case.state.v1', JSON.stringify({
+        scenario: caseScenario.value, start: startEl.value, end: endEl.value, max: maxRecords.value
+      }));
+    }
+    function restoreCaseState() {
+      const state = loadStored('wtl.case.state.v1', {});
+      caseScenario.value = state.scenario || 'general';
+      maxRecords.value = state.max || '1500';
+      const now = new Date();
+      const start = new Date(now.getTime() - 7 * 86400000);
+      startEl.value = state.start || localDate(start);
+      endEl.value = state.end || localDate(now);
+    }
+    function localDate(value) {
+      const year = value.getFullYear();
+      const month = String(value.getMonth() + 1).padStart(2, '0');
+      const day = String(value.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+    function levelBadge(value) {
+      if (value === '高') return '<span class="badge bad">高</span>';
+      if (value === '中') return '<span class="badge warn">中</span>';
+      if (value === '低') return '<span class="badge info">低</span>';
+      return '<span class="badge ok">-</span>';
+    }
+    function rowClass(item) { return item.level === '高' ? 'high' : (item.level === '中' ? 'medium' : ''); }
+    function allValues(item) { return Object.values(item).map(text); }
+    function filterItems(items, requireQuery) {
+      const q = queryEl.value.trim();
+      if (requireQuery && !q) return [];
+      return items.filter(item => {
+        if (groupFilter && item.group !== groupFilter) return false;
+        if (sourceEl.value && item.source !== sourceEl.value) return false;
+        if (levelEl.value && item.level !== levelEl.value) return false;
+        return !q || window.wtlMatchesQuery(q, allValues(item));
+      });
+    }
+    function bookmarkKey(type, item) {
+      return [type, item.time, item.source, item.category || item.kind, item.entity || item.name, item.pid, item.path, item.remote].map(text).join('|');
+    }
+    function isBookmarked(type, item) { return bookmarks.some(x => x.key === bookmarkKey(type, item)); }
+    function toggleBookmark(type, item) {
+      const key = bookmarkKey(type, item);
+      const index = bookmarks.findIndex(x => x.key === key);
+      if (index >= 0) bookmarks.splice(index, 1);
+      else bookmarks.push({ key, type, item, savedAt: new Date().toLocaleString('zh-CN') });
+      sessionStorage.setItem('wtl.case.bookmarks.v1', JSON.stringify(bookmarks));
+      render();
+    }
+    function timelineRows(items) {
+      return `<table><thead><tr>
+        <th class="action">收藏</th><th class="time">时间</th><th class="level">级别</th><th class="score">场景分</th>
+        <th class="scenario">命中依据</th><th class="group">证据组</th><th class="source">来源</th>
+        <th class="category">分类</th><th class="category">动作</th><th class="entity">实体</th><th class="pid">PID</th>
+        <th class="user">用户</th><th class="remote">远程/IP/域名</th><th class="path">路径</th><th class="details">详情</th>
+      </tr></thead><tbody>${items.map(item => `<tr class="${rowClass(item)}">
+        <td><button class="pin" data-pin="timeline" data-key="${escapeCell(bookmarkKey('timeline', item))}">${isBookmarked('timeline', item) ? '取消' : '收藏'}</button></td>
+        <td title="${escapeCell(item.time)}">${escapeCell(item.time)}</td><td>${levelBadge(item.level)}</td><td>${escapeCell(item.scenarioScore || 0)}</td>
+        <td title="${escapeCell(item.scenarioReason)}">${escapeCell(item.scenarioReason)}</td><td title="${escapeCell(item.group)}">${escapeCell(item.group)}</td>
+        <td title="${escapeCell(item.source)}">${escapeCell(item.source)}</td><td title="${escapeCell(item.category)}">${escapeCell(item.category)}</td>
+        <td title="${escapeCell(item.action)}">${escapeCell(item.action)}</td><td title="${escapeCell(item.entity)}">${escapeCell(item.entity)}</td>
+        <td>${escapeCell(item.pid)}</td><td title="${escapeCell(item.user)}">${escapeCell(item.user)}</td>
+        <td title="${escapeCell(item.remote)}">${escapeCell(item.remote)}</td><td title="${escapeCell(item.path)}">${escapeCell(item.path)}</td>
+        <td title="${escapeCell(item.details)}">${escapeCell(item.details)}</td>
+      </tr>`).join('')}</tbody></table>`;
+    }
+    function entityRows(items) {
+      return `<table><thead><tr>
+        <th class="action">收藏</th><th class="level">级别</th><th class="score">场景分</th><th class="scenario">命中依据</th>
+        <th class="group">证据组</th><th class="category">类型</th><th class="source">来源</th>
+        <th class="entity">名称</th><th class="entity">值</th><th class="pid">PID</th><th class="user">用户</th>
+        <th class="remote">远程/IP/域名</th><th class="path">路径</th><th class="source">哈希</th><th class="details">详情</th>
+      </tr></thead><tbody>${items.map(item => `<tr class="${rowClass(item)}">
+        <td><button class="pin" data-pin="entity" data-key="${escapeCell(bookmarkKey('entity', item))}">${isBookmarked('entity', item) ? '取消' : '收藏'}</button></td>
+        <td>${levelBadge(item.level)}</td><td>${escapeCell(item.scenarioScore || 0)}</td>
+        <td title="${escapeCell(item.scenarioReason)}">${escapeCell(item.scenarioReason)}</td><td title="${escapeCell(item.group)}">${escapeCell(item.group)}</td>
+        <td title="${escapeCell(item.kind)}">${escapeCell(item.kind)}</td>
+        <td title="${escapeCell(item.source)}">${escapeCell(item.source)}</td><td title="${escapeCell(item.name)}">${escapeCell(item.name)}</td>
+        <td title="${escapeCell(item.value)}">${escapeCell(item.value)}</td><td>${escapeCell(item.pid)}</td>
+        <td title="${escapeCell(item.user)}">${escapeCell(item.user)}</td><td title="${escapeCell(item.remote)}">${escapeCell(item.remote)}</td>
+        <td title="${escapeCell(item.path)}">${escapeCell(item.path)}</td><td title="${escapeCell(item.hash)}">${escapeCell(item.hash)}</td>
+        <td title="${escapeCell(item.details)}">${escapeCell(item.details)}</td>
+      </tr>`).join('')}</tbody></table>`;
+    }
+    function renderBookmarks() {
+      previousPage.disabled = true;
+      nextPage.disabled = true;
+      pageStatus.textContent = '';
+      if (!bookmarks.length) {
+        table.innerHTML = '<div class="empty">尚未收藏证据。可在时间线或全局搜索结果中点击“收藏”。</div>';
+        viewStatus.textContent = '收藏 0 条';
+        return;
+      }
+      const timeline = bookmarks.filter(x => x.type === 'timeline').map(x => x.item);
+      const entities = bookmarks.filter(x => x.type === 'entity').map(x => x.item);
+      table.innerHTML = [
+        timeline.length ? timelineRows(timeline) : '',
+        entities.length ? entityRows(entities) : ''
+      ].join('');
+      viewStatus.textContent = `收藏 ${bookmarks.length} 条`;
+    }
+    function renderSummary() {
+      const high = snapshot.timeline.filter(x => x.level === '高').length;
+      const medium = snapshot.timeline.filter(x => x.level === '中').length;
+      summaryEl.innerHTML = [
+        `<span class="badge bad">场景重点 ${snapshot.focusCount || 0}</span>`,
+        `<span class="badge info">时间线 ${snapshot.timeline.length}</span>`,
+        `<span class="badge info">实体 ${snapshot.entities.length}</span>`,
+        `<span class="badge bad">高 ${high}</span>`,
+        `<span class="badge warn">中 ${medium}</span>`,
+        `<span class="badge info">收藏 ${bookmarks.length}</span>`,
+        snapshot.generatedAt ? `<span class="badge ok">${escapeCell(snapshot.generatedAt)}</span>` : ''
+      ].join('');
+      coverageEl.innerHTML = (snapshot.coverage || []).map(item => {
+        const css = item.status === '完成' ? 'ok' : (item.status === '部分' ? 'warn' : 'bad');
+        const active = groupFilter === item.source ? ' active' : '';
+        return `<button class="badge ${css}${active}" data-group="${escapeCell(item.source)}" title="打开 ${escapeCell(item.source)} 证据；${escapeCell(item.message)}">${escapeCell(item.source)}：${escapeCell(item.status)} ${escapeCell(item.count)}</button>`;
+      }).join('');
+      clearGroupButton.hidden = !groupFilter;
+      clearGroupButton.textContent = groupFilter ? `清除：${groupFilter}` : '清除证据组';
+    }
+    function updateSources(items) {
+      const selected = sourceEl.value;
+      const values = [...new Set(items.map(x => x.source).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-CN'));
+      sourceEl.innerHTML = '<option value="">全部来源</option>' + values.map(x => `<option value="${escapeCell(x)}">${escapeCell(x)}</option>`).join('');
+      if (values.includes(selected)) sourceEl.value = selected;
+    }
+    function pageItems(items) {
+      const pages = Math.max(1, Math.ceil(items.length / pageSize));
+      if (currentPage >= pages) currentPage = pages - 1;
+      if (currentPage < 0) currentPage = 0;
+      previousPage.disabled = currentPage <= 0;
+      nextPage.disabled = currentPage >= pages - 1;
+      pageStatus.textContent = items.length ? `第 ${currentPage + 1} / ${pages} 页` : '';
+      return items.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
+    }
+    function renderContent() {
+      document.querySelectorAll('button.tab').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === activeTab));
+      renderSummary();
+      if (activeTab === 'bookmarks') { renderBookmarks(); return; }
+      if (activeTab === 'focus' || activeTab === 'evidence' || activeTab === 'search') {
+        updateSources(snapshot.entities || []);
+        const requireQuery = activeTab === 'search';
+        let candidates = snapshot.entities || [];
+        if (activeTab === 'focus') {
+          candidates = candidates.filter(item => item.focus).sort((a, b) => (b.scenarioScore || 0) - (a.scenarioScore || 0));
+        }
+        const matched = filterItems(candidates, requireQuery);
+        const items = pageItems(matched);
+        if (requireQuery && !queryEl.value.trim()) {
+          table.innerHTML = '<div class="empty">请输入 PID、MD5、IP、域名、用户、进程、服务、任务或路径；可使用 /正则/i 或 re:正则。</div>';
+          viewStatus.textContent = `已建立 ${snapshot.entities.length} 条实体索引`;
+          return;
+        }
+        const emptyText = activeTab === 'focus'
+          ? '当前场景没有达到重点阈值的证据。可查看“全部证据”，或切换场景后重新评分。'
+          : '没有匹配的证据实体';
+        table.innerHTML = items.length ? entityRows(items) : `<div class="empty">${emptyText}</div>`;
+        viewStatus.textContent = `${groupFilter ? groupFilter + '；' : ''}匹配 ${matched.length} 条，显示 ${items.length} 条`;
+        return;
+      }
+      updateSources(snapshot.timeline || []);
+      const matched = filterItems(snapshot.timeline || [], false);
+      const items = pageItems(matched);
+      table.innerHTML = items.length ? timelineRows(items) : '<div class="empty">没有匹配的时间线事件</div>';
+      viewStatus.textContent = `匹配 ${matched.length} 条，显示 ${items.length} / ${snapshot.timeline.length} 条`;
+    }
+    function render() {
+      try {
+        renderContent();
+      } catch (err) {
+        table.innerHTML = `<div class="empty bad-text">${escapeCell(err.message || err)}</div>`;
+        viewStatus.textContent = '搜索条件无效';
+      }
+    }
+    async function loadJSON(url) {
+      const res = await fetch(url, {cache:'no-store'});
+      if (!res.ok) throw new Error(await res.text() || res.statusText);
+      return res.json();
+    }
+    function params(refresh) {
+      const value = new URLSearchParams({start:startEl.value, end:endEl.value, max:maxRecords.value, scenario:caseScenario.value});
+      if (refresh) value.set('refresh', '1');
+      return value;
+    }
+    async function collect(refresh) {
+      saveCaseState();
+      const scenarioLabel = caseScenario.options[caseScenario.selectedIndex]?.text || '通用应急排查';
+      statusEl.textContent = refresh ? '正在重新采集进程、主机、日志、通信、驱动和传统执行痕迹...' : '正在载入案件证据并按场景评分...';
+      table.innerHTML = `<div class="empty">${refresh ? '案件证据重新采集中。读取多个证据源需要一些时间，请稍候...' : '正在按所选场景整理重点线索...'}</div>`;
+      exportButton.disabled = true;
+      snapshot = await loadJSON(`/api/investigation?${params(refresh)}`);
+      statusEl.textContent = `${scenarioLabel}：重点 ${snapshot.focusCount || 0}，时间线 ${snapshot.timeline.length}，实体 ${snapshot.entities.length}`;
+      exportButton.disabled = false;
+      render();
+    }
+
+    document.getElementById('collect').addEventListener('click', () => collect(true).catch(showError));
+    exportButton.addEventListener('click', () => {
+      const value = params(false);
+      const q = queryEl.value.trim();
+      if (q) value.set('q', q);
+      window.wtlDownload(`/api/investigation.csv?${value}`).catch(showError);
+    });
+    document.querySelectorAll('button.tab').forEach(btn => btn.addEventListener('click', () => {
+      activeTab = btn.dataset.tab;
+      currentPage = 0;
+      sourceEl.value = '';
+      render();
+    }));
+    coverageEl.addEventListener('click', event => {
+      const button = event.target.closest('button[data-group]');
+      if (!button) return;
+      groupFilter = button.dataset.group || '';
+      activeTab = 'evidence';
+      currentPage = 0;
+      queryEl.value = '';
+      sourceEl.value = '';
+      render();
+    });
+    clearGroupButton.addEventListener('click', () => {
+      groupFilter = '';
+      currentPage = 0;
+      render();
+    });
+    table.addEventListener('click', event => {
+      const button = event.target.closest('button[data-pin]');
+      if (!button) return;
+      const type = button.dataset.pin;
+      const items = type === 'timeline' ? snapshot.timeline : snapshot.entities;
+      const item = items.find(x => bookmarkKey(type, x) === button.dataset.key) || bookmarks.find(x => x.key === button.dataset.key)?.item;
+      if (item) toggleBookmark(type, item);
+    });
+    [queryEl, sourceEl, levelEl].forEach(control => control.addEventListener(control.tagName === 'INPUT' ? 'input' : 'change', () => {
+      currentPage = 0;
+      render();
+    }));
+    previousPage.addEventListener('click', () => { currentPage--; render(); });
+    nextPage.addEventListener('click', () => { currentPage++; render(); });
+    caseScenario.addEventListener('change', () => {
+      saveCaseState();
+      activeTab = 'focus';
+      groupFilter = '';
+      currentPage = 0;
+      collect(false).catch(showError);
+    });
+    [startEl, endEl, maxRecords].forEach(control => control.addEventListener('change', saveCaseState));
+    function showError(err) {
+      table.innerHTML = `<div class="empty bad-text">${escapeCell(err.message || err)}</div>`;
+      statusEl.textContent = '案件证据采集失败';
+    }
+
+    restoreCaseState();
+    collect(false).catch(showError);
+  </script>
+</body>
+</html>

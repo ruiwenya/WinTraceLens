@@ -29,6 +29,8 @@ func Collect(opts Options) (Snapshot, error) {
 [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 $OutputEncoding = [Console]::OutputEncoding
 $max = %d
+$psRawMax = $max
+$psLaunchMax = [Math]::Min(1000, [Math]::Max(200, ($max * 2)))
 $startTimeRaw = %q
 $endTimeRaw = %q
 $startTime = if ([string]::IsNullOrWhiteSpace($startTimeRaw)) { $null } else { [datetime]::ParseExact($startTimeRaw, 'yyyy-MM-dd HH:mm:ss', [Globalization.CultureInfo]::InvariantCulture) }
@@ -93,6 +95,29 @@ function First-Value($data, $names) {
     }
   }
   return ''
+}
+
+function Test-WinTraceLensCollectorText($value) {
+  $text = ([string]$value).ToLowerInvariant()
+  if ($text -eq '') { return $false }
+  if ($text.Contains('wtl-collector') -or $text.Contains('wtlcollectormarker')) { return $true }
+
+  $legacyPairs = @(
+    @('function new-eventfilter', 'convert-securityaction'),
+    @('$customrootsjson', 'function add-artifactrecord'),
+    @('function suspicion-forfile', 'function add-filelist'),
+    @('function data-summary', 'function join-endpoint'),
+    @('function get-wmicompat', 'win32_service'),
+    @('function walk-folder', 'schedule.service'),
+    @('function add-driverevent', 'system/7045'),
+    @('function test-eventsource', 'windows filtering platform'),
+    @('win32_perfformatteddata_perfproc_process', 'parentprocessid,commandline,workingsetsize'),
+    @('get-ciminstance win32_process', 'processid,parentprocessid | convertto-json')
+  )
+  foreach ($pair in $legacyPairs) {
+    if ($text.Contains([string]$pair[0]) -and $text.Contains([string]$pair[1])) { return $true }
+  }
+  return $false
 }
 
 function Convert-LogonTypeName($value) {
@@ -292,13 +317,74 @@ try {
   Add-Error '服务创建' $_.Exception.Message
 }
 
+$collectorProcessWindows = @()
+try {
+  $launchEvents = @(Get-WinEvent -FilterHashtable (New-EventFilter 'Windows PowerShell' @(400)) -MaxEvents $psLaunchMax -ErrorAction Stop)
+  foreach ($launchEvent in $launchEvents) {
+    $launchData = Get-EventDataMap $launchEvent
+    $launchCommand = First-Value $launchData @('HostApplication','CommandLine','Payload','ContextInfo','Param1')
+    $launchContent = (Get-EventMessage $launchEvent) + ' ' + $launchCommand
+    if (Test-WinTraceLensCollectorText $launchContent) {
+      $launchProcessId = Clean-Value $launchEvent.ProcessId
+      if ($launchProcessId -ne '' -and $launchProcessId -ne '0' -and $null -ne $launchEvent.TimeCreated) {
+        $collectorProcessWindows += [pscustomobject]@{ ProcessId=$launchProcessId; Start=$launchEvent.TimeCreated.AddMinutes(-2); End=$launchEvent.TimeCreated.AddMinutes(30) }
+      }
+    }
+  }
+} catch {}
+
 foreach ($psLog in @('Microsoft-Windows-PowerShell/Operational','Windows PowerShell')) {
   try {
-    Get-WinEvent -FilterHashtable (New-EventFilter $psLog @(400,403,600,800,4103,4104,4105,4106)) -MaxEvents $max -ErrorAction Stop | ForEach-Object {
-      $data = Get-EventDataMap $_
+    $psEvents = @(Get-WinEvent -FilterHashtable (New-EventFilter $psLog @(400,403,600,800,4103,4104,4105,4106)) -MaxEvents $psRawMax -ErrorAction Stop)
+    $collectorScriptBlocks = @{}
+    $collectorRunspaces = @{}
+    $collectorActivities = @{}
+
+    foreach ($psEvent in $psEvents) {
+      $data = Get-EventDataMap $psEvent
       $command = First-Value $data @('ScriptBlockText','CommandLine','Payload','ContextInfo','HostApplication','Path','Param1')
-      $account = First-Value $data @('UserId','User')
-      Add-Event 'PowerShell日志' $psLog $_ $data (Convert-PowerShellAction $_.Id) $account '' '' '' '' '' '' 'powershell.exe' '' $command '' '' '' '' ''
+      $content = (Get-EventMessage $psEvent) + ' ' + $command
+      if (Test-WinTraceLensCollectorText $content) {
+        $scriptBlockId = First-Value $data @('ScriptBlockId','ScriptBlockID')
+        $runspaceId = First-Value $data @('RunspaceId','RunspaceID')
+        $activityId = Clean-Value $psEvent.ActivityId
+        $processId = Clean-Value $psEvent.ProcessId
+        if ($scriptBlockId -ne '') { $collectorScriptBlocks[$scriptBlockId] = $true }
+        if ($runspaceId -ne '') { $collectorRunspaces[$runspaceId] = $true }
+        if ($activityId -ne '' -and $activityId -ne '00000000-0000-0000-0000-000000000000') { $collectorActivities[$activityId] = $true }
+        if ($processId -ne '' -and $processId -ne '0' -and $null -ne $psEvent.TimeCreated) {
+          $collectorProcessWindows += [pscustomobject]@{ ProcessId=$processId; Start=$psEvent.TimeCreated.AddMinutes(-2); End=$psEvent.TimeCreated.AddMinutes(30) }
+        }
+      }
+    }
+
+    $kept = 0
+    foreach ($psEvent in $psEvents) {
+      if ($kept -ge $max) { break }
+      $data = Get-EventDataMap $psEvent
+      $command = First-Value $data @('ScriptBlockText','CommandLine','Payload','ContextInfo','HostApplication','Path','Param1')
+      $content = (Get-EventMessage $psEvent) + ' ' + $command
+      $scriptBlockId = First-Value $data @('ScriptBlockId','ScriptBlockID')
+      $runspaceId = First-Value $data @('RunspaceId','RunspaceID')
+      $activityId = Clean-Value $psEvent.ActivityId
+      $processId = Clean-Value $psEvent.ProcessId
+      $isCollector = Test-WinTraceLensCollectorText $content
+      if (-not $isCollector -and $scriptBlockId -ne '' -and $collectorScriptBlocks.ContainsKey($scriptBlockId)) { $isCollector = $true }
+      if (-not $isCollector -and $runspaceId -ne '' -and $collectorRunspaces.ContainsKey($runspaceId)) { $isCollector = $true }
+      if (-not $isCollector -and $activityId -ne '' -and $activityId -ne '00000000-0000-0000-0000-000000000000' -and $collectorActivities.ContainsKey($activityId)) { $isCollector = $true }
+      if (-not $isCollector -and $processId -ne '' -and $processId -ne '0' -and $null -ne $psEvent.TimeCreated) {
+        foreach ($window in $collectorProcessWindows) {
+          if ($window.ProcessId -eq $processId -and $psEvent.TimeCreated -ge $window.Start -and $psEvent.TimeCreated -le $window.End) {
+            $isCollector = $true
+            break
+          }
+        }
+      }
+      if (-not $isCollector) {
+        $account = First-Value $data @('UserId','User')
+        Add-Event 'PowerShell日志' $psLog $psEvent $data (Convert-PowerShellAction $psEvent.Id) $account '' '' '' '' '' '' 'powershell.exe' '' $command '' '' '' '' ''
+        $kept++
+      }
     }
   } catch {
     Add-Error 'PowerShell日志' ($psLog + ': ' + $_.Exception.Message)
@@ -332,7 +418,7 @@ $ordered = @($events | Sort-Object @{Expression={ if ($_.Time) { $_.Time } else 
 } | ConvertTo-Json -Compress -Depth 5
 `, maxRecords, startRaw, endRaw)
 
-	cmd := winexec.Command("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script)
+	cmd := winexec.PowerShell(script)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
@@ -353,6 +439,7 @@ $ordered = @($events | Sort-Object @{Expression={ if ($_.Time) { $_.Time } else 
 	if err := json.Unmarshal(data, &snapshot); err != nil {
 		return Snapshot{}, err
 	}
+	snapshot.Events = FilterCollectorEvents(snapshot.Events)
 	snapshot.CollectionErrors = localizeErrors(snapshot.CollectionErrors)
 	return snapshot, nil
 }

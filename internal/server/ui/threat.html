@@ -47,9 +47,10 @@
     }
     main {
       display: grid;
-      grid-template-rows: auto auto auto minmax(0, 1fr);
+      grid-template-rows: auto auto auto auto minmax(0, 1fr);
       gap: 10px;
       height: calc(100vh - 48px);
+      min-height: 680px;
       padding: 12px;
     }
     .toolbar, .tabs, .summary {
@@ -137,7 +138,8 @@
     .badge.bad { border-color: #edb4bd; background: #fff0f2; color: var(--bad); }
     .badge.info { border-color: #c7d7ee; background: #eef5fd; color: var(--info); }
     .panel {
-      min-height: 0;
+      grid-row: 5;
+      min-height: 260px;
       border: 1px solid var(--line);
       border-radius: 6px;
       background: var(--panel);
@@ -176,6 +178,9 @@
     .category { width: 120px; }
     .pid { width: 80px; }
     .process { width: 170px; }
+    .driver { width: 190px; }
+    .service { width: 220px; }
+    .kind { width: 130px; }
     .score { width: 70px; }
     .signature { width: 150px; }
     .connections { width: 80px; }
@@ -191,17 +196,107 @@
       color: var(--muted);
     }
     .bad-text { color: var(--bad); }
+    .driver-workbench {
+      grid-row: 4;
+      display: grid;
+      gap: 8px;
+      padding: 9px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+    }
+    .driver-workbench[hidden] { display: none; }
+    .driver-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .driver-actions strong { font-size: 14px; }
+    .quick-filters {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .quick-filters button {
+      height: 30px;
+      padding: 0 10px;
+      border-color: var(--line);
+      background: #fff;
+      color: var(--text);
+    }
+    .quick-filters button.active {
+      border-color: var(--accent);
+      background: #e8f2fb;
+      color: var(--accent-dark);
+    }
+    .check-grid {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 3px;
+    }
+    .check-item {
+      flex: 0 0 265px;
+      min-width: 265px;
+      height: 84px;
+      padding: 10px;
+      border: 1px solid var(--line-soft);
+      border-left: 4px solid #8aa0b8;
+      border-radius: 4px;
+      background: #fbfcfe;
+    }
+    .check-item.high { border-left-color: var(--bad); background: #fff8f9; }
+    .check-item.medium { border-left-color: var(--warn); background: #fffbf3; }
+    .check-item .check-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 5px;
+    }
+    .check-item strong {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .check-item p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+      display: -webkit-box;
+      overflow: hidden;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+    }
+    .boundary-note {
+      padding: 8px 10px;
+      border-left: 4px solid #6f8094;
+      background: #f3f6f9;
+      color: #46566b;
+      font-size: 12px;
+      line-height: 1.4;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    th.sortable { cursor: pointer; user-select: none; }
+    th.sortable:hover { background: #dfeaf4; }
+    .sort-mark { color: var(--accent); }
   </style>
   <link rel="stylesheet" href="/nav.css">
-  <script src="/app.js" defer></script>
+  <script src="/app.js"></script>
 </head>
 <body>
   <header>
     <h1>WinTraceLens</h1>
     <div class="app-meta">
-      <span class="release-badge" data-app-version>1.0 基础版</span>
+      <span class="release-badge" data-app-version>2.0 预览版</span>
       <span class="permission-badge unknown" data-admin-status>权限检测中</span>
-      <span class="module-title">内存异常与行为关联</span>
+      <span class="module-title">V2 威胁分析与多源核查</span>
     </div>
   </header>
 
@@ -210,12 +305,12 @@
       <nav class="top-nav" aria-label="主要功能">
         <a class="nav-link" href="/">进程信息</a>
         <a class="nav-link" href="/host.html">主机信息</a>
-        <a class="nav-link" href="/findings.html">关注项</a>
+        <a class="nav-link" href="/findings.html">风险线索</a>
         <a class="nav-link" aria-current="page" href="/threat.html">威胁分析</a>
+        <a class="nav-link" href="/investigation.html">案件调查</a>
         <a class="nav-link" href="/filetrace.html">文件痕迹</a>
         <a class="nav-link" href="/history.html">历史通信</a>
         <a class="nav-link" href="/security.html">事件日志</a>
-        <a class="nav-link" href="/health.html">日志健康</a>
         <a class="nav-link" href="/yara.html">YARA扫描</a>
         <a class="nav-link" href="/ai.html">AI分析</a>
       </nav>
@@ -233,17 +328,33 @@
         <option value="300" selected>进程 300</option>
       </select>
       <label class="toggle"><input id="include-threads" type="checkbox" checked>线程入口</label>
-      <label class="toggle"><input id="include-filetrace" type="checkbox">关联文件痕迹</label>
-      <input id="filter" placeholder="按进程、PID、路径、原因、证据过滤">
+      <input id="filter" placeholder="按进程、PID、路径、原因过滤；支持 /正则/i">
       <span id="status" class="status">尚未加载</span>
     </div>
 
     <div class="tabs">
-      <button class="tab active" data-tab="behavior">行为关联</button>
-      <button class="tab" data-tab="memory">内存异常</button>
+      <button class="tab active" data-tab="memory">内存异常</button>
+      <button class="tab" data-tab="drivers">内核驱动风险</button>
     </div>
 
     <div id="summary" class="summary"></div>
+
+    <section id="driver-workbench" class="driver-workbench" hidden>
+      <div class="driver-actions">
+        <strong>V2 多源核查</strong>
+        <div class="quick-filters" aria-label="驱动风险快捷筛选">
+          <button class="active" data-driver-filter="all">全部风险</button>
+          <button data-driver-filter="high">仅高风险</button>
+          <button data-driver-filter="source">多源不一致</button>
+          <button data-driver-filter="missing">文件缺失</button>
+          <button data-driver-filter="unsigned">签名异常</button>
+          <button data-driver-filter="events">有事件证据</button>
+          <button id="export-checks">导出核查摘要</button>
+        </div>
+      </div>
+      <div id="driver-checks" class="check-grid"></div>
+      <div id="driver-boundary" class="boundary-note"></div>
+    </section>
 
     <section class="panel">
       <div id="table" class="table-wrap">
@@ -261,13 +372,20 @@
     const maxRecords = document.getElementById('max-records');
     const processLimit = document.getElementById('process-limit');
     const includeThreads = document.getElementById('include-threads');
-    const includeFileTrace = document.getElementById('include-filetrace');
-    let activeTab = 'behavior';
-    let behaviorItems = [];
+    const driverWorkbench = document.getElementById('driver-workbench');
+    const driverChecksEl = document.getElementById('driver-checks');
+    const driverBoundaryEl = document.getElementById('driver-boundary');
+    let activeTab = 'memory';
     let memoryRecords = [];
+    let driverItems = [];
     let collectionErrors = [];
     let sourceSummary = '';
     let generatedAt = '';
+    let driverChecks = [];
+    let driverBoundary = '';
+    let driverSourceCounts = {};
+    let driverRiskFilter = 'all';
+    let driverSort = { key: 'score', direction: 'desc' };
 
     function text(value) {
       return value == null ? '' : String(value);
@@ -301,14 +419,50 @@
     }
 
     function visibleItems() {
-      const q = filter.value.trim().toLowerCase();
-      const items = activeTab === 'memory' ? memoryRecords : behaviorItems;
+      const q = filter.value.trim();
+      let items = activeTab === 'memory' ? memoryRecords : driverItems;
+      if (activeTab === 'drivers') {
+        items = items.filter(matchesDriverRiskFilter);
+        items = sortDriverRows(items);
+      }
       if (!q) return items;
-      return items.filter(item => Object.values(item).some(v => text(v).toLowerCase().includes(q)));
+      return items.filter(item => window.wtlMatchesQuery(q, Object.values(item)));
+    }
+
+    function matchesDriverRiskFilter(item) {
+      if (driverRiskFilter === 'high') return item.level === '高';
+      if (driverRiskFilter === 'source') return text(item.sourceDiff).includes('无') && item.kind !== '系统转储驱动';
+      if (driverRiskFilter === 'missing') return text(item.reason).includes('文件缺失') || text(item.reason).includes('当前磁盘未匹配') || text(item.hashError).includes('找不到');
+      if (driverRiskFilter === 'unsigned') return ['无签名请注意!!!', '签名异常'].includes(item.signature) || text(item.reason).includes('未签名');
+      if (driverRiskFilter === 'events') return Boolean(text(item.eventMatches).trim());
+      return true;
+    }
+
+    function driverSortValue(item, key) {
+      if (['score', 'sizeKb'].includes(key)) return Number(item[key] || 0);
+      if (key === 'level') return ({ '高': 3, '中': 2, '低': 1 }[item.level] || 0);
+      return text(item[key]).toLowerCase();
+    }
+
+    function sortDriverRows(items) {
+      const direction = driverSort.direction === 'asc' ? 1 : -1;
+      return [...items].sort((a, b) => {
+        const av = driverSortValue(a, driverSort.key);
+        const bv = driverSortValue(b, driverSort.key);
+        if (av < bv) return -1 * direction;
+        if (av > bv) return 1 * direction;
+        return text(a.name).localeCompare(text(b.name), 'zh-CN');
+      });
+    }
+
+    function driverHeader(label, key, className) {
+      const active = driverSort.key === key;
+      const mark = active ? (driverSort.direction === 'asc' ? ' ↑' : ' ↓') : '';
+      return `<th class="${className || ''} sortable" data-sort="${key}" title="单击按${escapeCell(label)}排序">${escapeCell(label)}<span class="sort-mark">${mark}</span></th>`;
     }
 
     function renderSummary() {
-      const items = activeTab === 'memory' ? memoryRecords : behaviorItems;
+      const items = activeTab === 'memory' ? memoryRecords : driverItems;
       const high = items.filter(x => x.level === '高').length;
       const medium = items.filter(x => x.level === '中').length;
       const low = items.filter(x => x.level === '低').length;
@@ -324,32 +478,25 @@
       ].join('');
     }
 
-    function renderBehavior() {
-      const items = visibleItems();
-      if (!items.length) {
-        table.innerHTML = '<div class="empty">没有匹配的行为关联结果</div>';
-        return;
-      }
-      table.innerHTML = `<table>
-        <thead><tr>
-          <th class="level">级别</th><th class="category">场景</th><th class="score">评分</th><th class="pid">PID</th>
-          <th class="process">进程/来源</th><th class="connections">连接</th><th class="signature">签名</th>
-          <th class="path">路径</th><th class="reason">摘要</th><th class="details">证据</th><th class="details">关联信号</th>
-        </tr></thead>
-        <tbody>${items.map(item => `<tr class="${rowClass(item)}">
-          <td class="level">${levelBadge(item.level)}</td>
-          <td class="category" title="${escapeCell(item.scenario)}">${escapeCell(item.scenario)}</td>
-          <td class="score">${escapeCell(item.score)}</td>
-          <td class="pid">${escapeCell(item.pid || '')}</td>
-          <td class="process" title="${escapeCell(item.process)}">${escapeCell(item.process)}</td>
-          <td class="connections">${escapeCell(item.connections || '')}</td>
-          <td class="signature" title="${escapeCell(item.signature)}">${escapeCell(item.signature)}</td>
-          <td class="path" title="${escapeCell(item.path)}">${escapeCell(item.path)}</td>
-          <td class="reason" title="${escapeCell(item.summary)}">${escapeCell(item.summary)}</td>
-          <td class="details" title="${escapeCell(item.evidence)}">${escapeCell(item.evidence)}</td>
-          <td class="details" title="${escapeCell(item.related)}">${escapeCell(item.related)}</td>
-        </tr>`).join('')}</tbody>
-      </table>`;
+    function renderDriverWorkbench() {
+      driverWorkbench.hidden = activeTab !== 'drivers';
+      if (activeTab !== 'drivers') return;
+      document.querySelectorAll('[data-driver-filter]').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.driverFilter === driverRiskFilter);
+      });
+      driverChecksEl.innerHTML = driverChecks.map(check => {
+        const css = check.level === '高' ? 'high' : (check.level === '中' ? 'medium' : '');
+        const badge = check.level === '高' ? 'bad' : (check.level === '中' ? 'warn' : 'info');
+        const samples = (check.samples || []).join('；');
+        return `<article class="check-item ${css}" title="${escapeCell(check.recommendation)}${samples ? `\n样例：${escapeCell(samples)}` : ''}">
+          <div class="check-head"><strong>${escapeCell(check.title)}</strong><span class="badge ${badge}">${escapeCell(check.status)} ${escapeCell(check.count)}</span></div>
+          <p>${escapeCell(check.detail)}</p>
+        </article>`;
+      }).join('');
+      const counts = driverSourceCounts || {};
+      driverBoundaryEl.innerHTML = `<strong>检测边界：</strong>${escapeCell(driverBoundary)} ` +
+        `<span>本次证据源：内核 ${escapeCell(counts.kernelModules || 0)}、Services ${escapeCell(counts.registryDrivers || 0)}、磁盘 ${escapeCell(counts.diskDrivers || 0)}、Amcache ${escapeCell(counts.amcacheDrivers || 0)}、事件 ${escapeCell(counts.loadEvents || 0)}。</span>`;
+      driverBoundaryEl.title = `${driverBoundary} 本次证据源：内核 ${counts.kernelModules || 0}、Services ${counts.registryDrivers || 0}、磁盘 ${counts.diskDrivers || 0}、Amcache ${counts.amcacheDrivers || 0}、事件 ${counts.loadEvents || 0}。`;
     }
 
     function renderMemory() {
@@ -382,12 +529,60 @@
       </table>`;
     }
 
+    function renderDrivers() {
+      const items = visibleItems();
+      if (!items.length) {
+        table.innerHTML = '<div class="empty">没有匹配的内核驱动风险结果</div>';
+        return;
+      }
+      table.innerHTML = `<table style="min-width: 3820px">
+        <thead><tr>
+          ${driverHeader('级别', 'level', 'level')}${driverHeader('评分', 'score', 'score')}${driverHeader('驱动名', 'name', 'driver')}${driverHeader('类型', 'kind', 'kind')}
+          ${driverHeader('签名', 'signature', 'signature')}<th class="details">签名说明</th>${driverHeader('MD5', 'md5', 'address')}${driverHeader('基址', 'baseAddress', 'address')}
+          ${driverHeader('大小', 'sizeKb', 'size')}${driverHeader('路径', 'path', 'path')}${driverHeader('服务项', 'serviceName', 'service')}${driverHeader('启动', 'serviceStart', 'kind')}
+          <th class="path">服务ImagePath</th><th class="path">注册表路径</th>${driverHeader('事件关联', 'eventMatches', 'details')}
+          <th class="path">磁盘路径</th>${driverHeader('Amcache路径', 'amcachePath', 'path')}${driverHeader('Amcache SHA1', 'amcacheSha1', 'address')}
+          ${driverHeader('Amcache记录时间', 'amcacheTime', 'details')}<th class="details">Amcache信息</th>${driverHeader('多源差异', 'sourceDiff', 'details')}
+          ${driverHeader('原因', 'reason', 'reason')}<th class="details">证据</th>
+        </tr></thead>
+        <tbody>${items.map(item => `<tr class="${rowClass(item)}">
+          <td class="level">${levelBadge(item.level)}</td>
+          <td class="score">${escapeCell(item.score)}</td>
+          <td class="driver" title="${escapeCell(item.name)}">${escapeCell(item.name)}</td>
+          <td class="kind" title="${escapeCell(item.kind)}">${escapeCell(item.kind)}</td>
+          <td class="signature" title="${escapeCell(item.signature)}">${escapeCell(item.signature)}</td>
+          <td class="details" title="${escapeCell(item.signatureMsg)}">${escapeCell(item.signatureMsg)}</td>
+          <td class="address" title="${escapeCell(item.md5 || item.hashError)}">${escapeCell(item.md5 || item.hashError)}</td>
+          <td class="address" title="${escapeCell(item.baseAddress)}">${escapeCell(item.baseAddress)}</td>
+          <td class="size" title="${escapeCell(item.sizeKb)}">${escapeCell(formatSize(Number(item.sizeKb || 0) * 1024))}</td>
+          <td class="path" title="${escapeCell(item.path)}">${escapeCell(item.path)}</td>
+          <td class="service" title="${escapeCell(item.serviceName)}">${escapeCell(item.serviceName)}</td>
+          <td class="kind" title="${escapeCell(item.serviceStart || item.serviceType)}">${escapeCell(item.serviceStart || item.serviceType)}</td>
+          <td class="path" title="${escapeCell(item.serviceImage)}">${escapeCell(item.serviceImage)}</td>
+          <td class="path" title="${escapeCell(item.registryPath)}">${escapeCell(item.registryPath)}</td>
+          <td class="details" title="${escapeCell(item.eventMatches)}">${escapeCell(item.eventMatches)}</td>
+          <td class="path" title="${escapeCell(item.diskPath)}">${escapeCell(item.diskPath)}</td>
+          <td class="path" title="${escapeCell(item.amcachePath)}">${escapeCell(item.amcachePath)}</td>
+          <td class="address" title="${escapeCell(item.amcacheSha1)}">${escapeCell(item.amcacheSha1)}</td>
+          <td class="details" title="${escapeCell(item.amcacheTime)}">${escapeCell(item.amcacheTime)}</td>
+          <td class="details" title="${escapeCell(item.amcacheInfo)}">${escapeCell(item.amcacheInfo)}</td>
+          <td class="details" title="${escapeCell(item.sourceDiff)}">${escapeCell(item.sourceDiff)}</td>
+          <td class="reason" title="${escapeCell(item.reason)}">${escapeCell(item.reason)}</td>
+          <td class="details" title="${escapeCell(item.evidence)}">${escapeCell(item.evidence)}</td>
+        </tr>`).join('')}</tbody>
+      </table>`;
+    }
+
     function render() {
       document.querySelectorAll('button.tab').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === activeTab));
+      processLimit.disabled = activeTab !== 'memory';
+      includeThreads.disabled = activeTab !== 'memory';
       const items = visibleItems();
       statusEl.textContent = `显示 ${items.length} 条`;
       renderSummary();
-      if (activeTab === 'memory') renderMemory(); else renderBehavior();
+      renderDriverWorkbench();
+      if (activeTab === 'memory') renderMemory();
+      else renderDrivers();
     }
 
     async function loadJSON(url) {
@@ -396,7 +591,7 @@
       return res.json();
     }
 
-    function queryString(includeFilter) {
+    function queryString(includeFilter, force = false) {
       const params = new URLSearchParams({
         max: maxRecords.value || '500'
       });
@@ -404,16 +599,14 @@
         params.set('processes', processLimit.value || '300');
         params.set('regions', '64');
         params.set('threads', includeThreads.checked ? '1' : '0');
-      } else {
-        params.set('memory', '1');
-        params.set('filetrace', includeFileTrace.checked ? '1' : '0');
       }
       const q = filter.value.trim();
       if (includeFilter && q) params.set('q', q);
+      if (force) params.set('refresh', '1');
       return params.toString();
     }
 
-    async function load() {
+    async function load(force = false) {
       exportCSV.disabled = true;
       collectionErrors = [];
       sourceSummary = '';
@@ -422,16 +615,19 @@
       if (activeTab === 'memory') {
         statusEl.textContent = '正在扫描进程内存异常...';
         table.innerHTML = '<div class="empty">正在枚举虚拟内存区域和线程入口...</div>';
-        const data = await loadJSON(`/api/threat/memory?${queryString(false)}`);
+        const data = await loadJSON(`/api/threat/memory?${queryString(false, force)}`);
         memoryRecords = data.records || [];
         collectionErrors = data.collectionErrors || [];
         generatedAt = data.generatedAt || '';
         sourceSummary = `扫描进程 ${data.scannedProcesses || 0}，跳过 ${data.skippedProcesses || 0}`;
       } else {
-        statusEl.textContent = '正在做行为关联分析...';
-        table.innerHTML = '<div class="empty">正在关联进程、持久化、网络连接和内存异常...</div>';
-        const data = await loadJSON(`/api/threat/behavior?${queryString(false)}`);
-        behaviorItems = data.items || [];
+        statusEl.textContent = '正在分析内核驱动风险...';
+        table.innerHTML = '<div class="empty">正在交叉核查 PID 4 内核模块、Services、磁盘驱动、Amcache 历史清单与加载事件...</div>';
+        const data = await loadJSON(`/api/threat/drivers?${queryString(false, force)}`);
+        driverItems = data.items || [];
+        driverChecks = data.checks || [];
+        driverBoundary = data.boundary || '';
+        driverSourceCounts = data.sourceCounts || {};
         collectionErrors = data.collectionErrors || [];
         generatedAt = data.generatedAt || '';
         sourceSummary = data.sourceSummary || '';
@@ -441,24 +637,43 @@
     }
 
     function downloadCSV(url) {
-      const a = document.createElement('a');
-      a.href = url;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
+      window.wtlDownload(url).catch(err => {
+        statusEl.textContent = `导出失败：${err.message || err}`;
+      });
     }
 
     document.getElementById('refresh').addEventListener('click', () => {
-      load().catch(err => {
+      load(true).catch(err => {
         table.innerHTML = `<div class="empty bad-text">${escapeCell(err.message)}</div>`;
         statusEl.textContent = '加载失败';
       });
     });
 
     exportCSV.addEventListener('click', () => {
-      const endpoint = activeTab === 'memory' ? '/api/threat/memory.csv' : '/api/threat/behavior.csv';
+      const endpoint = activeTab === 'memory' ? '/api/threat/memory.csv' : '/api/threat/drivers.csv';
       statusEl.textContent = '正在生成 CSV...';
       downloadCSV(`${endpoint}?${queryString(true)}`);
+    });
+
+    document.getElementById('export-checks').addEventListener('click', () => {
+      statusEl.textContent = '正在生成 V2 核查摘要 CSV...';
+      downloadCSV(`/api/threat/driver-checks.csv?${queryString(false)}`);
+    });
+
+    document.querySelectorAll('[data-driver-filter]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        driverRiskFilter = btn.dataset.driverFilter;
+        render();
+      });
+    });
+
+    table.addEventListener('click', event => {
+      const header = event.target.closest('th[data-sort]');
+      if (!header || activeTab !== 'drivers') return;
+      const key = header.dataset.sort;
+      if (driverSort.key === key) driverSort.direction = driverSort.direction === 'asc' ? 'desc' : 'asc';
+      else driverSort = { key, direction: ['score', 'sizeKb', 'level'].includes(key) ? 'desc' : 'asc' };
+      render();
     });
 
     document.querySelectorAll('button.tab').forEach(btn => {
@@ -488,13 +703,6 @@
         statusEl.textContent = '加载失败';
       });
     });
-    includeFileTrace.addEventListener('change', () => {
-      if (activeTab === 'behavior') load().catch(err => {
-        table.innerHTML = `<div class="empty bad-text">${escapeCell(err.message)}</div>`;
-        statusEl.textContent = '加载失败';
-      });
-    });
-
     load().catch(err => {
       table.innerHTML = `<div class="empty bad-text">${escapeCell(err.message)}</div>`;
       statusEl.textContent = '加载失败';

@@ -43,7 +43,23 @@ func BuildFindings(processes []process.Info, snapshot host.Snapshot) []Finding {
 		name := fmt.Sprintf("%s (PID %d)", item.Name, item.PID)
 		command := item.Path
 		extra := fmt.Sprintf("父进程: %s (%d), 连接数: %d", item.ParentName, item.ParentPID, item.ConnectionCount)
-		findings = append(findings, executableFindings("进程", name, item.MD5, item.Signature, item.SignatureMsg, item.Path, command, item.HashError, item.PathError, extra, item.ConnectionCount)...)
+		if !isExpectedPowerShellCollectorAccessNoise(item) {
+			findings = append(findings, executableFindings("进程", name, item.MD5, item.Signature, item.SignatureMsg, item.Path, command, item.HashError, item.PathError, extra, item.ConnectionCount)...)
+		}
+		if item.EnumerationWarning != "" && !isExpectedPowerShellEnumerationNoise(item) {
+			level := levelLow
+			if item.Path != "" || item.ConnectionCount > 0 {
+				level = levelMedium
+			}
+			findings = append(findings, Finding{
+				Level:  level,
+				Source: "进程枚举差异",
+				Name:   name,
+				Reason: item.EnumerationWarning,
+				Path:   item.Path,
+				Extra:  item.EnumerationSources,
+			})
+		}
 	}
 
 	for _, item := range snapshot.Services {
@@ -106,6 +122,36 @@ func BuildFindings(processes []process.Info, snapshot host.Snapshot) []Finding {
 		return findings[i].Name < findings[j].Name
 	})
 	return findings
+}
+
+func isExpectedPowerShellEnumerationNoise(item process.Info) bool {
+	name := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(item.Name)), ".exe")
+	if name != "powershell" && name != "pwsh" {
+		return false
+	}
+	if item.ConnectionCount != 0 {
+		return false
+	}
+
+	collectorChild := selfidentity.IsScannerProcessName(item.ParentName)
+	if !collectorChild && item.Signature != signatureSystem && item.Signature != "已签名" {
+		return false
+	}
+	path := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(item.Path), "/", `\`))
+	return collectorChild || strings.Contains(path, `\windows\system32\windowspowershell\`) ||
+		strings.Contains(path, `\program files\powershell\`)
+}
+
+func isExpectedPowerShellCollectorAccessNoise(item process.Info) bool {
+	if item.ConnectionCount != 0 || item.Path != "" || (item.HashError == "" && item.PathError == "") {
+		return false
+	}
+	name := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(item.Name)), ".exe")
+	parent := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(item.ParentName)), ".exe")
+	if (name == "powershell" || name == "pwsh") && selfidentity.IsScannerProcessName(parent) {
+		return true
+	}
+	return name == "conhost" && (parent == "powershell" || parent == "pwsh")
 }
 
 func executableFindings(source, name, md5, signature, signatureMsg, path, command, hashError, pathError, extra string, connectionCount int) []Finding {

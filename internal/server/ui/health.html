@@ -159,7 +159,7 @@
     .bad { color: var(--bad); }
   </style>
   <link rel="stylesheet" href="/nav.css">
-  <script src="/app.js" defer></script>
+  <script src="/app.js"></script>
 </head>
 <body>
   <header>
@@ -176,8 +176,9 @@
       <nav class="top-nav" aria-label="主要功能">
         <a class="nav-link" href="/">进程信息</a>
         <a class="nav-link" href="/host.html">主机信息</a>
-        <a class="nav-link" href="/findings.html">关注项</a>
+        <a class="nav-link" href="/findings.html">风险线索</a>
         <a class="nav-link" href="/threat.html">威胁分析</a>
+        <a class="nav-link" href="/investigation.html">案件调查</a>
         <a class="nav-link" href="/filetrace.html">文件痕迹</a>
         <a class="nav-link" href="/history.html">历史通信</a>
         <a class="nav-link" href="/security.html">事件日志</a>
@@ -196,7 +197,7 @@
         <option value="权限不足">权限不足</option>
         <option value="不可用">不可用</option>
       </select>
-      <input id="filter" placeholder="按类别、日志源、日志名、详情、建议过滤">
+      <input id="filter" placeholder="按类别、日志源、日志名、详情过滤；支持 /正则/i">
       <span id="status" class="status">尚未加载</span>
     </div>
 
@@ -236,11 +237,11 @@
 
     function visibleItems() {
       const status = statusFilter.value;
-      const q = filter.value.trim().toLowerCase();
+      const q = filter.value.trim();
       return sources.filter(item => {
         if (status !== 'all' && item.status !== status) return false;
         if (!q) return true;
-        return Object.values(item).some(v => text(v).toLowerCase().includes(q));
+        return window.wtlMatchesQuery(q, Object.values(item));
       });
     }
 

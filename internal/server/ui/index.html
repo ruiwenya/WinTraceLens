@@ -153,7 +153,7 @@
     }
 
     .process-table {
-      min-width: 1900px;
+      min-width: 2150px;
     }
 
     .detail-table {
@@ -238,6 +238,27 @@
 
     .state {
       width: 120px;
+    }
+
+    .kind {
+      width: 96px;
+    }
+
+    .sort-head {
+      width: 100%;
+      height: auto;
+      justify-content: flex-start;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      font-weight: 650;
+      cursor: pointer;
+    }
+
+    .sort-head:hover {
+      color: var(--accent-dark);
     }
 
     .endpoint {
@@ -434,7 +455,7 @@
     }
   </style>
   <link rel="stylesheet" href="/nav.css">
-  <script src="/app.js" defer></script>
+  <script src="/app.js"></script>
 </head>
 <body>
   <header>
@@ -451,17 +472,17 @@
       <nav class="top-nav" aria-label="主要功能">
         <a class="nav-link" aria-current="page" href="/">进程信息</a>
         <a class="nav-link" href="/host.html">主机信息</a>
-        <a class="nav-link" href="/findings.html">关注项</a>
+        <a class="nav-link" href="/findings.html">风险线索</a>
         <a class="nav-link" href="/threat.html">威胁分析</a>
+        <a class="nav-link" href="/investigation.html">案件调查</a>
         <a class="nav-link" href="/filetrace.html">文件痕迹</a>
         <a class="nav-link" href="/history.html">历史通信</a>
         <a class="nav-link" href="/security.html">事件日志</a>
-        <a class="nav-link" href="/health.html">日志健康</a>
         <a class="nav-link" href="/yara.html">YARA扫描</a>
         <a class="nav-link" href="/ai.html">AI分析</a>
       </nav>
       <span class="current-module">当前：进程信息</span>
-      <input id="filter" placeholder="按 PID、进程名、父进程、路径、MD5、签名过滤">
+      <input id="filter" placeholder="按 PID、进程名、路径、MD5、签名过滤；支持 /正则/i">
       <select id="connection-sort" title="按连接数排序">
         <option value="default">默认排序</option>
         <option value="desc">连接数降序</option>
@@ -483,6 +504,7 @@
               <th class="md5">MD5</th>
               <th class="signature">签名信息</th>
               <th class="connections">连接</th>
+              <th class="path" title="Toolhelp32 与 NT 系统信息是两个用户态视图，不代表能够发现 DKOM 隐藏进程">枚举视图/差异</th>
               <th class="actions">操作</th>
               <th class="ppid">父 PID</th>
               <th class="parent">父进程</th>
@@ -493,7 +515,7 @@
             </tr>
           </thead>
           <tbody id="rows">
-            <tr><td class="empty" colspan="12">正在加载进程...</td></tr>
+            <tr><td class="empty" colspan="13">正在加载进程...</td></tr>
           </tbody>
         </table>
       </div>
@@ -550,6 +572,8 @@
     let activeTab = 'basic';
     let loadingConnections = false;
     let loadingEvidence = false;
+    let moduleSortKey = 'name';
+    let moduleSortDir = 'asc';
 
     function text(value) {
       return value == null ? '' : String(value);
@@ -570,14 +594,15 @@
     }
 
     function visibleItems() {
-      const q = filter.value.trim().toLowerCase();
+      const q = filter.value.trim();
       let items = processes;
       if (q) {
-        items = processes.filter(p => [
-        p.pid, p.name, p.parentPid, p.parentName, p.createdAt,
-        p.path, p.fileCreated, p.fileModified, p.md5, p.signature,
-        p.signatureMsg, p.connectionCount, p.hashError, p.pathError
-      ].some(v => text(v).toLowerCase().includes(q)));
+        items = processes.filter(p => window.wtlMatchesQuery(q, [
+          p.pid, p.name, p.parentPid, p.parentName, p.createdAt,
+          p.path, p.fileCreated, p.fileModified, p.md5, p.signature,
+          p.signatureMsg, p.connectionCount, p.hashError, p.pathError,
+          p.enumerationSources, p.enumerationWarning
+        ]));
       }
       if (connectionSort.value === 'desc') {
         items = [...items].sort((a, b) => Number(b.connectionCount || 0) - Number(a.connectionCount || 0));
@@ -612,7 +637,7 @@
     function renderRows() {
       const items = visibleItems();
       if (!items.length) {
-        rows.innerHTML = '<tr><td class="empty" colspan="12">没有匹配的进程</td></tr>';
+        rows.innerHTML = '<tr><td class="empty" colspan="13">没有匹配的进程</td></tr>';
         statusEl.textContent = `显示 0 / ${processes.length}`;
         return;
       }
@@ -629,6 +654,7 @@
           <td class="md5 ${hashClass}" title="${escapeCell(hashText)}">${escapeCell(hashText)}</td>
           <td class="signature" title="${escapeCell(p.signatureMsg || p.signature)}">${renderSignature(p.signature, p.signatureMsg)}</td>
           <td class="connections" title="${escapeCell(p.connectionCount)}">${escapeCell(p.connectionCount || '')}</td>
+          <td class="path ${p.enumerationWarning ? 'warn' : ''}" title="${escapeCell(p.enumerationWarning || p.enumerationSources)}">${escapeCell(p.enumerationWarning || p.enumerationSources)}</td>
           <td class="actions">
             <button class="mini" data-action="copy-md5" data-pid="${escapeCell(p.pid)}" ${copyDisabled}>复制</button>
             <button class="mini secondary" data-action="open-path" data-pid="${escapeCell(p.pid)}" ${openDisabled}>位置</button>
@@ -679,7 +705,7 @@
         detailBody.innerHTML = '<div class="empty">正在刷新网络连接...</div>';
       }
       try {
-        const data = await loadJSON(`/api/process/${selectedPid}/connections`);
+        const data = await loadJSON(`/api/process/${selectedPid}/connections?refresh=1`);
         selectedConnections = data.items || [];
       } catch (err) {
         selectedConnections = [];
@@ -696,7 +722,7 @@
       evidenceError = '';
       detailBody.innerHTML = '<div class="empty">正在采集关联证据...</div>';
       try {
-        selectedEvidence = await loadJSON(`/api/process/${selectedPid}/detail?max=120`);
+        selectedEvidence = await loadJSON(`/api/process/${selectedPid}/detail?max=120${force ? '&refresh=1' : ''}`);
       } catch (err) {
         selectedEvidence = null;
         evidenceError = err.message;
@@ -727,7 +753,9 @@
             ['路径', p.path || p.pathError],
             ['文件创建', p.fileCreated],
             ['文件修改', p.fileModified],
-            ['实时连接数', p.connectionCount]
+            ['实时连接数', p.connectionCount],
+            ['枚举视图', p.enumerationSources],
+            ['枚举差异', p.enumerationWarning]
           ])}</div>
         </section>
         <section class="detail-block">
@@ -772,13 +800,47 @@
       const bad = selectedModules.filter(m => m.signature === '签名异常').length;
       const signed = selectedModules.filter(m => m.signature === '已签名' || m.signature === '系统文件').length;
       const hashErrors = selectedModules.filter(m => m.hashError).length;
+      const kernel = selectedModules.filter(m => m.kind === '内核驱动').length;
       return [
         `<span class="tag info">模块 ${selectedModules.length}</span>`,
+        kernel ? `<span class="tag warn">内核驱动 ${kernel}</span>` : '',
         signed ? `<span class="tag ok">已签名/系统 ${signed}</span>` : '',
         unsigned ? `<span class="tag warn">无签名 ${unsigned}</span>` : '',
         bad ? `<span class="tag bad">签名异常 ${bad}</span>` : '',
         hashErrors ? `<span class="tag warn">MD5 失败 ${hashErrors}</span>` : ''
       ].filter(Boolean).join('');
+    }
+
+    function moduleSortIndicator(key) {
+      if (moduleSortKey !== key) return '';
+      return moduleSortDir === 'asc' ? ' ▲' : ' ▼';
+    }
+
+    function moduleSignatureRank(item) {
+      if (item.signature === '签名异常') return 0;
+      if (item.signature === '无签名请注意!!!') return 1;
+      if (item.hashError && !item.md5) return 2;
+      if (item.signature === '系统转储驱动') return 3;
+      if (!item.signature) return 4;
+      if (item.signature === '已签名' || item.signature === '系统文件') return 5;
+      return 6;
+    }
+
+    function sortedModulesForDisplay() {
+      const collator = new Intl.Collator('zh-CN', { numeric: true, sensitivity: 'base' });
+      const dir = moduleSortDir === 'desc' ? -1 : 1;
+      return [...selectedModules].sort((a, b) => {
+        let result = 0;
+        if (moduleSortKey === 'signature') {
+          result = moduleSignatureRank(a) - moduleSignatureRank(b);
+          if (result === 0) result = collator.compare(text(a.signature), text(b.signature));
+        } else {
+          result = collator.compare(text(a[moduleSortKey]), text(b[moduleSortKey]));
+        }
+        if (result === 0) result = collator.compare(text(a.name), text(b.name));
+        if (result === 0) result = collator.compare(text(a.path), text(b.path));
+        return result * dir;
+      });
     }
 
     function connectionSummaryTags() {
@@ -857,12 +919,14 @@
           detailBody.innerHTML = '<div class="empty">没有模块数据</div>';
           return;
         }
+        const moduleRows = sortedModulesForDisplay();
         detailBody.innerHTML = `<div class="summary-bar">${moduleSummaryTags()}</div><table class="detail-table">
           <thead>
             <tr>
-              <th class="name">模块名</th>
+              <th class="name"><button class="sort-head" data-action="sort-modules" data-key="name">模块名${moduleSortIndicator('name')}</button></th>
+              <th class="kind"><button class="sort-head" data-action="sort-modules" data-key="kind">类型${moduleSortIndicator('kind')}</button></th>
               <th class="md5">MD5</th>
-              <th class="signature">签名信息</th>
+              <th class="signature"><button class="sort-head" data-action="sort-modules" data-key="signature">签名信息${moduleSortIndicator('signature')}</button></th>
               <th class="state">基址</th>
               <th class="size">大小 KB</th>
               <th class="actions">操作</th>
@@ -870,11 +934,12 @@
             </tr>
           </thead>
           <tbody>
-            ${selectedModules.map(m => {
+            ${moduleRows.map(m => {
               const hashText = m.md5 || m.hashError || '';
               const copyDisabled = m.md5 ? '' : 'disabled';
               return `<tr>
                 <td class="name" title="${escapeCell(m.name)}">${escapeCell(m.name)}</td>
+                <td class="kind" title="${escapeCell(m.kind || '')}">${escapeCell(m.kind || '-')}</td>
                 <td class="md5 ${m.md5 ? '' : 'warn'}" title="${escapeCell(hashText)}">${escapeCell(hashText)}</td>
                 <td class="signature">${renderSignature(m.signature, m.signatureMsg)}</td>
                 <td class="state" title="${escapeCell(m.baseAddress)}">${escapeCell(m.baseAddress)}</td>
@@ -973,10 +1038,10 @@
       renderDetail();
     }
 
-    async function load() {
+    async function load(force = false) {
       statusEl.textContent = '正在采集进程、签名、连接和 MD5...';
       rows.innerHTML = '<tr><td class="empty" colspan="12">正在加载进程...</td></tr>';
-      const data = await loadJSON('/api/processes');
+      const data = await loadJSON(`/api/processes${force ? '?refresh=1' : ''}`);
       processes = data.items || [];
       const preferred = processes.find(p => p.md5 && p.signature !== '系统文件') || processes.find(p => p.md5) || processes[0];
       selectedPid = preferred ? preferred.pid : null;
@@ -1003,11 +1068,9 @@
     }
 
     function downloadCSV(url) {
-      const a = document.createElement('a');
-      a.href = url;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
+      window.wtlDownload(url).catch(err => {
+        statusEl.textContent = `导出失败：${err.message || err}`;
+      });
     }
 
     function filterQueryString() {
@@ -1021,7 +1084,7 @@
     }
 
     document.getElementById('refresh').addEventListener('click', () => {
-      load().catch(err => {
+      load(true).catch(err => {
         rows.innerHTML = `<tr><td class="empty bad" colspan="12">${escapeCell(err.message)}</td></tr>`;
         statusEl.textContent = '加载失败';
       });
@@ -1053,6 +1116,18 @@
       const evidenceButton = event.target.closest('button[data-action="refresh-evidence"]');
       if (evidenceButton) {
         loadSelectedEvidence(true).then(renderDetail);
+        return;
+      }
+      const sortButton = event.target.closest('button[data-action="sort-modules"]');
+      if (sortButton) {
+        const key = sortButton.dataset.key;
+        if (moduleSortKey === key) {
+          moduleSortDir = moduleSortDir === 'asc' ? 'desc' : 'asc';
+        } else {
+          moduleSortKey = key;
+          moduleSortDir = 'asc';
+        }
+        renderDetail();
         return;
       }
       const button = event.target.closest('button[data-action="copy-module-md5"]');

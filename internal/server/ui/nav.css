@@ -168,6 +168,66 @@ button.tab.active {
   box-shadow: inset 0 -2px 0 var(--accent);
 }
 
+#wtl-global-progress {
+  position: fixed;
+  right: 18px;
+  bottom: 16px;
+  z-index: 10000;
+  display: grid;
+  grid-template-columns: auto minmax(150px, 250px);
+  align-items: center;
+  gap: 10px;
+  width: min(440px, calc(100vw - 36px));
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 1px solid #b9cbe1;
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(20, 38, 62, 0.2);
+  color: var(--text);
+  font-size: 13px;
+}
+
+#wtl-global-progress[hidden] {
+  display: none;
+}
+
+.wtl-progress-label {
+  white-space: nowrap;
+}
+
+.wtl-progress-track {
+  position: relative;
+  display: block;
+  height: 7px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: #e5edf6;
+}
+
+.wtl-progress-bar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  display: block;
+  min-width: 8%;
+  border-radius: inherit;
+  background: #1971b8;
+  transition: width 220ms ease;
+}
+
+.wtl-progress-bar::after {
+  position: absolute;
+  inset: 0;
+  content: '';
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.65), transparent);
+  animation: wtl-progress-shimmer 1.1s linear infinite;
+}
+
+@keyframes wtl-progress-shimmer {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(100%); }
+}
+
 @media (max-width: 760px) {
   .top-nav {
     grid-template-columns: repeat(2, 88px);
@@ -181,5 +241,12 @@ button.tab.active {
   .app-meta {
     justify-content: flex-start;
     flex-wrap: wrap;
+  }
+
+  #wtl-global-progress {
+    right: 10px;
+    bottom: 10px;
+    grid-template-columns: 1fr;
+    width: calc(100vw - 20px);
   }
 }

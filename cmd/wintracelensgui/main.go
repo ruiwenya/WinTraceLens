@@ -21,7 +21,7 @@ import (
 	"github.com/ruiwenya/WinTraceLens/internal/server"
 )
 
-var version = "1.0.0-basic-gui"
+var version = "2.0.0-preview-gui"
 
 func main() {
 	runtime.LockOSThread()
@@ -42,12 +42,11 @@ func main() {
 		fatalGUI("WinTraceLens 启动失败", "无法启动本地界面服务: "+err.Error())
 	}
 
-	srv := &http.Server{
-		Handler: server.New(server.Options{
-			HashLimitBytes: *hashLimitMB * 1024 * 1024,
-			Version:        version,
-		}).Routes(),
-	}
+	appServer := server.New(server.Options{
+		HashLimitBytes: *hashLimitMB * 1024 * 1024,
+		Version:        version,
+	})
+	srv := &http.Server{Handler: appServer.Routes()}
 
 	go func() {
 		if err := srv.Serve(listener); err != nil && err != http.ErrServerClosed {
@@ -55,13 +54,13 @@ func main() {
 		}
 	}()
 
-	url := "http://" + listener.Addr().String()
+	url := appServer.BootstrapURL("http://" + listener.Addr().String())
 	w := webview2.NewWithOptions(webview2.WebViewOptions{
 		Debug:     *debug,
 		AutoFocus: true,
 		DataPath:  webviewDataPath(),
 		WindowOptions: webview2.WindowOptions{
-			Title:  "WinTraceLens 1.0 基础版",
+			Title:  "WinTraceLens基础版",
 			Width:  1280,
 			Height: 820,
 			Center: true,

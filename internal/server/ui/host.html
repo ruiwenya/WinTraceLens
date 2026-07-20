@@ -187,7 +187,7 @@
     .bad { color: var(--bad); }
   </style>
   <link rel="stylesheet" href="/nav.css">
-  <script src="/app.js" defer></script>
+  <script src="/app.js"></script>
 </head>
 <body>
   <header>
@@ -203,19 +203,19 @@
       <nav class="top-nav" aria-label="主要功能">
         <a class="nav-link" href="/">进程信息</a>
         <a class="nav-link" aria-current="page" href="/host.html">主机信息</a>
-        <a class="nav-link" href="/findings.html">关注项</a>
+        <a class="nav-link" href="/findings.html">风险线索</a>
         <a class="nav-link" href="/threat.html">威胁分析</a>
+        <a class="nav-link" href="/investigation.html">案件调查</a>
         <a class="nav-link" href="/filetrace.html">文件痕迹</a>
         <a class="nav-link" href="/history.html">历史通信</a>
         <a class="nav-link" href="/security.html">事件日志</a>
-        <a class="nav-link" href="/health.html">日志健康</a>
         <a class="nav-link" href="/yara.html">YARA扫描</a>
         <a class="nav-link" href="/ai.html">AI分析</a>
       </nav>
       <span class="current-module">当前：主机信息</span>
       <button id="refresh">刷新主机信息</button>
       <button id="export-csv" class="secondary" disabled>导出 CSV</button>
-      <input id="filter" placeholder="按名称、路径、命令、MD5、签名、账户过滤">
+      <input id="filter" placeholder="按名称、路径、命令、MD5、账户过滤；支持 /正则/i">
       <span id="status" class="status">尚未加载</span>
     </div>
     <div class="system-toolbar" aria-label="系统界面对比">
@@ -274,9 +274,9 @@
     }
 
     function visible(items) {
-      const q = filter.value.trim().toLowerCase();
+      const q = filter.value.trim();
       if (!q) return items;
-      return items.filter(item => Object.values(item).some(v => text(v).toLowerCase().includes(q)));
+      return items.filter(item => window.wtlMatchesQuery(q, Object.values(item)));
     }
 
     function render() {
@@ -378,11 +378,9 @@
     }
 
     function downloadCSV(url) {
-      const a = document.createElement('a');
-      a.href = url;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
+      window.wtlDownload(url).catch(err => {
+        statusEl.textContent = `导出失败：${err.message || err}`;
+      });
     }
 
     function hostCSVQueryString() {
@@ -404,11 +402,11 @@
       systemToolStatus.textContent = data.message || '已请求打开系统界面';
     }
 
-    async function load() {
+    async function load(force = false) {
       statusEl.textContent = '正在采集主机信息...';
       exportCSV.disabled = true;
       table.innerHTML = '<div class="empty">正在采集主机信息...</div>';
-      const res = await fetch('/api/host', { cache: 'no-store' });
+      const res = await fetch(`/api/host${force ? '?refresh=1' : ''}`, { cache: 'no-store' });
       if (!res.ok) throw new Error(await res.text() || res.statusText);
       snapshot = await res.json();
       exportCSV.disabled = false;
@@ -419,7 +417,7 @@
     }
 
     document.getElementById('refresh').addEventListener('click', () => {
-      load().catch(err => {
+      load(true).catch(err => {
         table.innerHTML = `<div class="empty bad">${escapeCell(err.message)}</div>`;
         statusEl.textContent = '加载失败';
       });

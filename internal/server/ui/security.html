@@ -46,7 +46,7 @@
     }
     main {
       display: grid;
-      grid-template-rows: auto auto auto minmax(0, 1fr);
+      grid-template-rows: auto auto auto auto minmax(0, 1fr);
       gap: 10px;
       height: calc(100vh - 48px);
       padding: 12px;
@@ -147,7 +147,7 @@
     }
     table {
       width: 100%;
-      min-width: 2680px;
+      min-width: 1180px;
       border-collapse: collapse;
       table-layout: fixed;
     }
@@ -166,6 +166,27 @@
       background: var(--head-2);
       color: #26384f;
       font-weight: 650;
+    }
+    button.sort-head {
+      width: 100%;
+      height: 24px;
+      justify-content: flex-start;
+      gap: 6px;
+      padding: 0;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      color: #26384f;
+      font-weight: 650;
+      text-align: left;
+    }
+    button.sort-head:hover {
+      color: var(--accent-dark);
+    }
+    .sort-indicator {
+      min-width: 12px;
+      color: var(--accent);
+      font-size: 11px;
     }
     tbody tr:hover td { background: #f3f8ff; }
     .time { width: 160px; }
@@ -189,9 +210,137 @@
     .details { width: 320px; }
     .empty { padding: 18px; color: var(--muted); }
     .bad-text { color: var(--bad); }
+    .view-context {
+      display: grid;
+      grid-template-columns: minmax(280px, 1fr) minmax(360px, 1.4fr);
+      gap: 14px;
+      padding: 11px 13px;
+      border: 1px solid #cbd8e6;
+      border-left: 4px solid var(--accent);
+      border-radius: 5px;
+      background: #f7faff;
+    }
+    .context-title {
+      margin: 0 0 4px;
+      color: #213850;
+      font-size: 15px;
+      font-weight: 700;
+    }
+    .context-text, .context-reminders {
+      color: var(--muted);
+      line-height: 1.5;
+    }
+    .context-reminders {
+      display: grid;
+      gap: 3px;
+    }
+    .context-reminders span::before {
+      content: "•";
+      margin-right: 7px;
+      color: var(--accent);
+    }
+    .collection-note {
+      color: var(--warn);
+    }
+    table.view-all { min-width: 1500px; }
+    table.view-logon { min-width: 2140px; }
+    table.view-rdp { min-width: 1640px; }
+    table.view-service { min-width: 1650px; }
+    table.view-user { min-width: 1700px; }
+    table.view-powershell { min-width: 1750px; }
+    table.view-sql { min-width: 1550px; }
+    td.wrap-cell {
+      white-space: normal;
+      line-height: 1.42;
+      overflow-wrap: anywhere;
+    }
+    .target { width: 220px; }
+    .note { width: 300px; }
+    .risk { width: 90px; }
+    .risk-badge {
+      display: inline-flex;
+      align-items: center;
+      height: 23px;
+      padding: 0 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fff;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .risk-badge.high { border-color: #edb4bd; background: #fff0f2; color: var(--bad); }
+    .risk-badge.medium { border-color: #f0ce9f; background: #fff7e8; color: var(--warn); }
+    .risk-badge.info { border-color: #c7d7ee; background: #eef5fd; color: var(--accent-dark); }
+    tr.risk-high td { background: #fffafb; }
+    tr.risk-medium td { background: #fffdf8; }
+    button.row-detail {
+      height: 28px;
+      padding: 0 9px;
+      border-color: var(--line);
+      background: #fff;
+      color: var(--accent-dark);
+    }
+    .detail-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 1000;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: rgba(18, 29, 43, 0.56);
+    }
+    .detail-overlay[hidden] { display: none; }
+    .detail-dialog {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr) auto;
+      width: min(980px, 96vw);
+      max-height: 88vh;
+      overflow: hidden;
+      border: 1px solid #8194aa;
+      border-radius: 6px;
+      background: #fff;
+      box-shadow: 0 18px 50px rgba(16, 31, 48, 0.28);
+    }
+    .detail-dialog h2 {
+      margin: 0;
+      padding: 13px 16px;
+      border-bottom: 1px solid var(--line);
+      font-size: 17px;
+    }
+    .detail-content {
+      overflow: auto;
+      padding: 12px 16px;
+    }
+    .detail-grid {
+      display: grid;
+      grid-template-columns: 150px minmax(0, 1fr);
+      border-top: 1px solid var(--line-soft);
+    }
+    .detail-grid > div {
+      padding: 8px;
+      border-bottom: 1px solid var(--line-soft);
+      line-height: 1.48;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+    }
+    .detail-grid > div:nth-child(odd) {
+      background: #f7f9fc;
+      color: #405168;
+      font-weight: 650;
+    }
+    .detail-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      padding: 10px 16px;
+      border-top: 1px solid var(--line);
+    }
+    @media (max-width: 900px) {
+      .view-context { grid-template-columns: 1fr; }
+    }
   </style>
   <link rel="stylesheet" href="/nav.css">
-  <script src="/app.js" defer></script>
+  <script src="/app.js"></script>
 </head>
 <body>
   <header>
@@ -207,12 +356,12 @@
       <nav class="top-nav" aria-label="主要功能">
         <a class="nav-link" href="/">进程信息</a>
         <a class="nav-link" href="/host.html">主机信息</a>
-        <a class="nav-link" href="/findings.html">关注项</a>
+        <a class="nav-link" href="/findings.html">风险线索</a>
         <a class="nav-link" href="/threat.html">威胁分析</a>
+        <a class="nav-link" href="/investigation.html">案件调查</a>
         <a class="nav-link" href="/filetrace.html">文件痕迹</a>
         <a class="nav-link" href="/history.html">历史通信</a>
         <a class="nav-link" aria-current="page" href="/security.html">事件日志</a>
-        <a class="nav-link" href="/health.html">日志健康</a>
         <a class="nav-link" href="/yara.html">YARA扫描</a>
         <a class="nav-link" href="/ai.html">AI分析</a>
       </nav>
@@ -234,7 +383,7 @@
       </select>
       <button id="refresh">刷新事件日志</button>
       <button id="export-csv" class="secondary" disabled>导出 CSV</button>
-      <input id="filter" placeholder="按分类、动作、账户、服务、命令、SQL、PowerShell、来源 IP 过滤">
+      <input id="filter" placeholder="按事件、账户、命令、来源 IP 过滤；支持 /正则/i">
       <span id="status" class="status">尚未加载</span>
     </div>
     <div class="tabs">
@@ -245,7 +394,9 @@
       <button class="tab" data-tab="user" data-label="用户账户">用户账户</button>
       <button class="tab" data-tab="powershell" data-label="PowerShell">PowerShell</button>
       <button class="tab" data-tab="sql" data-label="SQL Server">SQL Server</button>
+      <button class="tab" data-tab="health" data-label="日志健康">日志健康</button>
     </div>
+    <section id="view-context" class="view-context"></section>
     <div id="summary" class="summary"></div>
     <section class="panel">
       <div id="table" class="table-wrap">
@@ -253,6 +404,17 @@
       </div>
     </section>
   </main>
+
+  <div id="detail-overlay" class="detail-overlay" hidden>
+    <section class="detail-dialog" role="dialog" aria-modal="true" aria-labelledby="detail-dialog-title">
+      <h2 id="detail-dialog-title">事件详情</h2>
+      <div id="detail-content" class="detail-content"></div>
+      <div class="detail-actions">
+        <button id="detail-copy" class="secondary">复制原始信息</button>
+        <button id="detail-close">关闭</button>
+      </div>
+    </section>
+  </div>
 
   <script>
     const table = document.getElementById('table');
@@ -263,9 +425,23 @@
     const startDate = document.getElementById('start-date');
     const endDate = document.getElementById('end-date');
     const maxRecords = document.getElementById('max-records');
+    const viewContextEl = document.getElementById('view-context');
+    const detailOverlayEl = document.getElementById('detail-overlay');
+    const detailContentEl = document.getElementById('detail-content');
+    const detailTitleEl = document.getElementById('detail-dialog-title');
+    const detailCopyEl = document.getElementById('detail-copy');
+    const detailCloseEl = document.getElementById('detail-close');
     let events = [];
     let collectionErrors = [];
     let activeTab = 'all';
+    let detailRawText = '';
+    let failureCounts = new Map();
+    let sortByTab = {};
+    let healthSources = [];
+    let healthSummary = {};
+    let healthGeneratedAt = '';
+    const requestedTab = new URLSearchParams(location.search).get('tab');
+    if (document.querySelector(`button.tab[data-tab="${requestedTab}"]`)) activeTab = requestedTab;
 
     function text(value) {
       return value == null ? '' : String(value);
@@ -278,31 +454,34 @@
     }
 
     function visibleItems() {
-      const tabItems = events.filter(tabMatches);
-      const q = filter.value.trim().toLowerCase();
+      const tabItems = events.filter(item => tabMatches(item));
+      const q = filter.value.trim();
       if (!q) return tabItems;
-      return tabItems.filter(item => Object.values(item).some(v => text(v).toLowerCase().includes(q)));
+      return tabItems.filter(item => window.wtlMatchesQuery(q, Object.values(item)));
     }
 
-    function tabMatches(item) {
-      if (activeTab === 'all') return true;
-      if (activeTab === 'logon') {
+    function tabMatches(item, tab = activeTab) {
+      if (tab === 'all') return !isLowValuePowerShell(item);
+      if (tab === 'logon') {
         return ['登录', '登录失败', '注销', '特权登录', '工作站锁定', '工作站解锁'].includes(item.category);
       }
-      if (activeTab === 'rdp') return text(item.category).includes('RDP') || text(item.action).includes('RDP');
-      if (activeTab === 'service') return item.category === '服务创建';
-      if (activeTab === 'user') return item.category === '用户账户';
-      if (activeTab === 'powershell') return item.category === 'PowerShell日志';
-      if (activeTab === 'sql') return item.category === 'SQL Server日志';
+      if (tab === 'rdp') return text(item.category).includes('RDP') || text(item.action).includes('RDP');
+      if (tab === 'service') return item.category === '服务创建';
+      if (tab === 'user') return item.category === '用户账户';
+      if (tab === 'powershell') return item.category === 'PowerShell日志';
+      if (tab === 'sql') return item.category === 'SQL Server日志';
       return true;
     }
 
+    function isLowValuePowerShell(item) {
+      if (item.category !== 'PowerShell日志') return false;
+      const content = item.command || item.message || item.details || '';
+      return ['400', '403', '600', '4103', '4105', '4106'].includes(text(item.eventId)) && !suspiciousPowerShell(content);
+    }
+
     function tabCount(tab) {
-      const previous = activeTab;
-      activeTab = tab;
-      const count = events.filter(tabMatches).length;
-      activeTab = previous;
-      return count;
+      if (tab === 'health') return healthSources.length;
+      return events.filter(item => tabMatches(item, tab)).length;
     }
 
     function updateTabs() {
@@ -312,73 +491,532 @@
       });
     }
 
-    function renderSummary(items) {
-      const success = items.filter(x => x.action === '登录成功').length;
-      const failed = items.filter(x => x.action === '登录失败').length;
-      const privileged = items.filter(x => x.action === '特权登录').length;
-      const rdp = items.filter(x => text(x.category).includes('RDP') || text(x.logonType) === '10' || text(x.action).includes('RDP')).length;
-      const service = items.filter(x => x.category === '服务创建').length;
-      const user = items.filter(x => x.category === '用户账户').length;
-      const ps = items.filter(x => x.category === 'PowerShell日志').length;
-      const sql = items.filter(x => x.category === 'SQL Server日志').length;
-      const errors = collectionErrors.map(x => `<span class="count warn" title="${escapeCell(x)}">${escapeCell(x)}</span>`).join('');
-      summaryEl.innerHTML = `
-        <span class="count ok">登录成功 ${success}</span>
-        <span class="count bad">登录失败 ${failed}</span>
-        <span class="count warn">特权登录 ${privileged}</span>
-        <span class="count warn">RDP ${rdp}</span>
-        <span class="count warn">服务创建 ${service}</span>
-        <span class="count warn">用户账户 ${user}</span>
-        <span class="count warn">PowerShell ${ps}</span>
-        <span class="count warn">SQL Server ${sql}</span>
-        ${errors}
-      `;
+    function identity(item) {
+      const account = text(item.account);
+      const domain = text(item.domain);
+      if (domain && account) return `${domain}\\${account}`;
+      return account || domain || '-';
     }
 
-    function render() {
-      const items = visibleItems();
+    function eventRef(item) {
+      return `${item.eventId || '-'} · ${item.source || item.provider || '-'}`;
+    }
+
+    function sourceEndpoint(item) {
+      const endpoint = [item.sourceIp, item.sourcePort].filter(Boolean).join(':');
+      return endpoint || item.workstation || item.process || '-';
+    }
+
+    function commandOrMessage(item) {
+      return item.command || item.message || item.details || '-';
+    }
+
+    function compact(value, max = 360) {
+      const content = text(value).replace(/\s+/g, ' ').trim();
+      return content.length > max ? `${content.slice(0, max)}...` : (content || '-');
+    }
+
+    function suspiciousServicePath(value) {
+      return /\\(temp|appdata|programdata|users|recycler|\$recycle\.bin)\\/i.test(text(value)) ||
+        /\.(ps1|vbs|js|bat|cmd)\b/i.test(text(value));
+    }
+
+    function suspiciousPowerShell(value) {
+      return /(encodedcommand|frombase64string|downloadstring|downloadfile|invoke-webrequest|invoke-restmethod|\biex\b|invoke-expression|reflection\.assembly|executionpolicy\s+bypass|windowstyle\s+hidden|http[s]?:\/\/)/i.test(text(value));
+    }
+
+    function isWinTraceLensCollector(value) {
+      const content = text(value).toLowerCase();
+      if (content.includes('wtl-collector') || content.includes('wtlcollectormarker')) return true;
+      return [
+        ['function new-eventfilter', 'convert-securityaction'],
+        ['$customrootsjson', 'function add-artifactrecord'],
+        ['function suspicion-forfile', 'function add-filelist'],
+        ['function data-summary', 'function join-endpoint'],
+        ['function get-wmicompat', 'win32_service'],
+        ['function walk-folder', 'schedule.service'],
+        ['function add-driverevent', 'system/7045'],
+        ['function test-eventsource', 'windows filtering platform'],
+        ['win32_perfformatteddata_perfproc_process', 'parentprocessid,commandline,workingsetsize'],
+        ['get-ciminstance win32_process', 'processid,parentprocessid | convertto-json']
+      ].some(pair => content.includes(pair[0]) && content.includes(pair[1]));
+    }
+
+    function buildReviewContext(items) {
+      failureCounts = new Map();
+      items.filter(item => text(item.eventId) === '4625').forEach(item => {
+        const key = `${item.sourceIp || '-'}|${identity(item)}`;
+        failureCounts.set(key, (failureCounts.get(key) || 0) + 1);
+      });
+    }
+
+    function sameFailureCount(item) {
+      if (text(item.eventId) !== '4625') return 0;
+      const key = `${item.sourceIp || '-'}|${identity(item)}`;
+      return failureCounts.get(key) || 0;
+    }
+
+    function reviewFor(item, scopeItems) {
+      const eventId = text(item.eventId);
+      const action = text(item.action);
+      const combined = `${item.command || ''} ${item.message || ''} ${item.details || ''}`;
+      const primaryCommand = item.command || item.message || item.details || '';
+      const result = { level: 'info', label: '信息', note: '结合时间、账户和相邻事件判断，单条日志不能直接定性。' };
+
+      if (eventId === '4625' || action.includes('登录失败')) {
+        const failures = sameFailureCount(item);
+        result.level = failures >= 5 ? 'high' : 'medium';
+        result.label = failures >= 5 ? '高关注' : '需核查';
+        result.note = failures >= 5
+          ? `同一来源与账户组合出现 ${failures} 次失败，检查口令喷洒、暴力破解或横向移动。`
+          : '核对失败原因、来源 IP 与账户；单次失败也可能是密码输错或保存的旧凭据。';
+      } else if (eventId === '4672') {
+        result.level = 'medium';
+        result.label = '需核查';
+        result.note = '特权令牌分配事件，管理员和系统服务也会产生；关注非常用账户及异常时段。';
+      } else if (text(item.logonType) === '10') {
+        result.level = 'medium';
+        result.label = '需核查';
+        result.note = 'LogonType 10 表示远程交互式登录，核对来源 IP、账户和 RDP 会话事件。';
+      } else if (text(item.logonType) === '3') {
+        result.note = 'LogonType 3 是网络登录，常见于 SMB、共享、服务访问和内网横向连接。';
+      }
+
+      if (eventId === '1149') {
+        result.note = '1149 表示 RDP 网络级身份验证成功，不等同于已经建立桌面会话；继续查找 21/22/4624。';
+      } else if (['21', '22'].includes(eventId)) {
+        result.level = 'medium';
+        result.label = '需核查';
+        result.note = 'RDP 会话已登录或 Shell 已启动，应核对账户、来源 IP 和后续进程活动。';
+      } else if (['24', '39', '4779'].includes(eventId)) {
+        result.note = '会话断开不等于注销，用户进程可能仍在后台运行。';
+      } else if (['25', '4778'].includes(eventId)) {
+        result.level = 'medium';
+        result.label = '需核查';
+        result.note = '已有 RDP 会话被重新连接，检查是否来自新的来源地址或异常时间。';
+      }
+
+      if (eventId === '7045' || item.category === '服务创建') {
+        result.level = suspiciousServicePath(item.command) ? 'high' : 'medium';
+        result.label = result.level === 'high' ? '高关注' : '需核查';
+        result.note = suspiciousServicePath(item.command)
+          ? '新服务指向用户可写目录或脚本文件，优先核对签名、哈希、服务注册表和创建时间。'
+          : '7045 也可能由软件安装和驱动更新产生；核对服务路径、启动类型、签名及对应 4697。';
+      }
+
+      if (['4720', '4728', '4732', '4756'].includes(eventId)) {
+        result.level = 'high';
+        result.label = '高关注';
+        result.note = eventId === '4720'
+          ? '发现新用户创建，确认工单、创建者和是否随后加入高权限组。'
+          : '发现用户加入组，重点确认 Administrators、Remote Desktop Users 等高权限组变更。';
+      } else if (['4724', '4725', '4726', '4729', '4733', '4757'].includes(eventId)) {
+        result.level = 'medium';
+        result.label = '需核查';
+        result.note = '账户或组成员关系发生敏感变更，核对操作者、目标 SID 和变更原因。';
+      }
+
+      if (item.category === 'PowerShell日志') {
+        if (isWinTraceLensCollector(combined)) {
+          result.level = 'info';
+          result.label = '工具活动';
+          result.note = '该事件由 WinTraceLens 事件日志采集过程产生，已从新增采集结果中排除；旧记录仅作为工具活动显示。';
+        } else if (suspiciousPowerShell(primaryCommand)) {
+          result.level = 'high';
+          result.label = '高关注';
+          result.note = '命令包含编码、下载、隐藏执行或动态加载特征；查看完整脚本块并关联父进程和网络连接。';
+        } else if (eventId === '4104') {
+          result.note = '普通脚本块本身不代表恶意；重点检查混淆、下载执行、凭据访问、安全配置修改及异常父进程。';
+        } else {
+          result.note = '引擎启动或模块日志本身不代表恶意；结合命令内容、账号、父进程和执行频率判断。';
+        }
+      }
+
+      if (item.category === 'SQL Server日志') {
+        if (/(18456|login failed|登录失败|authentication failed)/i.test(combined)) {
+          result.level = 'high';
+          result.label = '高关注';
+          result.note = 'SQL 登录失败事件，检查客户端来源、目标账号、失败状态码和短时间重复次数。';
+        } else if (/(error|failed|severity|错误|失败)/i.test(`${item.level || ''} ${combined}`)) {
+          result.level = 'medium';
+          result.label = '需核查';
+          result.note = 'SQL Server 报告错误或失败，结合实例错误日志确认登录、作业、备份或数据库异常。';
+        } else {
+          result.note = 'SQL Application 事件可能是正常启动、备份或作业信息；按实例、级别和事件 ID 研判。';
+        }
+      }
+      return result;
+    }
+
+    const viewDefinitions = {
+      all: {
+        title: '全部事件概览',
+        description: '用于按时间线快速定位异常，再进入具体分类查看专用字段。主表只保留跨分类通用信息。',
+        reminders: ['先看高关注与需核查项，再按相同账户、IP、服务名和时间窗口串联。', '日志缺失、审计未开启或权限不足会造成盲区，不能把“没有记录”理解为“没有发生”。'],
+        placeholder: '搜索账户、IP、动作、事件 ID、服务、命令或消息',
+        empty: '当前时间范围内没有匹配的事件。',
+        columns: [
+          ['时间', 'time', 'time'], ['风险', 'risk', 'risk'], ['分类', 'category', 'category'],
+          ['动作', 'action', 'action'], ['对象', 'target', item => identity(item) !== '-' ? identity(item) : (item.serviceName || item.account || '-')],
+          ['来源线索', 'source', sourceEndpoint], ['事件/来源', 'source', eventRef],
+          ['研判备注', 'note wrap-cell', 'note'], ['详情', 'short', 'detail']
+        ]
+      },
+      logon: {
+        title: '登录与注销审计',
+        description: '聚焦 4624、4625、4634、4647、4672、4800、4801，区分登录结果、登录类型和来源。',
+        reminders: ['LogonType 3 常见于 SMB 和服务访问；LogonType 10 才是远程交互式 RDP。', '4672 在管理员和 SYSTEM 活动中很常见，应结合账户、时间和来源判断。'],
+        placeholder: '搜索账户、来源 IP、工作站、登录类型、状态码或失败原因',
+        empty: '当前范围没有登录、注销、锁定或特权登录事件。',
+        columns: [
+          ['时间', 'time', 'time'], ['风险', 'risk', 'risk'], ['结果/动作', 'action', 'action'], ['账户', 'account', identity],
+          ['操作者', 'account', item => item.subject || '-'], ['类型', 'logon', item => [item.logonType, item.logonTypeName].filter(Boolean).join(' · ') || '-'],
+          ['来源 IP/端口', 'ip', sourceEndpoint], ['工作站', 'workstation', item => item.workstation || '-'],
+          ['认证包', 'short', item => item.authPackage || '-'], ['进程', 'process', item => item.process || '-'],
+          ['状态/原因', 'reason wrap-cell', item => [item.status, item.failureReason].filter(Boolean).join(' · ') || '-'],
+          ['研判备注', 'note wrap-cell', 'note'], ['详情', 'short', 'detail']
+        ]
+      },
+      rdp: {
+        title: 'RDP 连接与会话',
+        description: '把 NLA 认证、会话登录、Shell 启动、断开和重新连接分开显示，避免把 1149 误认为完整登录成功。',
+        reminders: ['1149 仅代表身份验证通过；21/22 或 4624 LogonType 10 更能证明会话建立。', '断开事件不等于注销，必要时继续检查会话和后台进程。'],
+        placeholder: '搜索 RDP 账户、来源 IP、会话 ID、动作或事件 ID',
+        empty: '当前范围没有 RDP 认证或会话事件；相关 Operational 日志可能未启用或已被覆盖。',
+        columns: [
+          ['时间', 'time', 'time'], ['风险', 'risk', 'risk'], ['阶段', 'action', 'action'], ['账户', 'account', identity],
+          ['来源 IP', 'ip', item => item.sourceIp || '-'], ['工作站', 'workstation', item => item.workstation || '-'],
+          ['会话信息', 'details wrap-cell', item => compact(item.details || item.message, 260)], ['事件/日志', 'source', eventRef],
+          ['研判备注', 'note wrap-cell', 'note'], ['详情', 'short', 'detail']
+        ]
+      },
+      service: {
+        title: '服务与驱动创建',
+        description: '聚焦 System 7045 新服务安装事件，用于排查持久化、恶意驱动和远程服务创建。',
+        reminders: ['优先检查随机服务名、无签名文件、文件缺失以及 Temp、ProgramData、用户目录路径。', '合法软件安装也会产生 7045，建议与 Security 4697、文件时间和驱动风险页交叉验证。'],
+        placeholder: '搜索服务名、映像路径、账户、启动类型或事件来源',
+        empty: '当前范围没有 7045 服务创建事件；Security 4697 是否可见取决于审计策略。',
+        columns: [
+          ['时间', 'time', 'time'], ['风险', 'risk', 'risk'], ['服务名', 'service', item => item.serviceName || '-'],
+          ['映像路径/命令', 'command wrap-cell', item => item.command || '-'], ['运行账户', 'account', item => item.account || '-'],
+          ['服务/启动类型', 'details wrap-cell', item => compact(item.details, 280)], ['事件/来源', 'source', eventRef],
+          ['研判备注', 'note wrap-cell', 'note'], ['详情', 'short', 'detail']
+        ]
+      },
+      user: {
+        title: '用户与组成员变更',
+        description: '聚焦用户创建、启用、禁用、删除、密码变更以及安全组成员增删。',
+        reminders: ['新建账号后紧接着加入 Administrators 或 Remote Desktop Users 是高价值线索。', '目标 SID 比显示名更稳定，重命名账户时仍可用于关联。'],
+        placeholder: '搜索目标账户、SID、操作者、组信息、动作或事件 ID',
+        empty: '当前范围没有用户或组成员关系变更事件。',
+        columns: [
+          ['时间', 'time', 'time'], ['风险', 'risk', 'risk'], ['变更动作', 'action', 'action'],
+          ['目标账户', 'account', identity], ['目标 SID', 'sid', item => item.targetSid || '-'],
+          ['操作者', 'account', item => item.subject || '-'], ['组/补充信息', 'details wrap-cell', item => compact(item.details, 300)],
+          ['事件/来源', 'source', eventRef], ['研判备注', 'note wrap-cell', 'note'], ['详情', 'short', 'detail']
+        ]
+      },
+      powershell: {
+        title: 'PowerShell 执行审计',
+        description: '分别查看引擎、模块、管道和脚本块日志，优先关注 4104 中的完整脚本内容。',
+        reminders: ['未启用脚本块日志时，4104 可能没有数据；这不代表主机没有执行 PowerShell。', 'EncodedCommand、下载执行、IEX、隐藏窗口和反射加载需要优先核查。'],
+        placeholder: '搜索 PowerShell 命令、脚本内容、账户、Provider 或事件 ID',
+        empty: '没有找到 PowerShell 事件；请在日志健康页确认 Operational 和脚本块日志状态。',
+        columns: [
+          ['时间', 'time', 'time'], ['风险', 'risk', 'risk'], ['事件', 'action', item => `${item.action || '-'} (${item.eventId || '-'})`],
+          ['账户', 'account', item => item.account || '-'], ['命令/脚本块', 'command wrap-cell', item => compact(commandOrMessage(item), 420)],
+          ['Provider/级别', 'provider', item => [item.provider, item.level].filter(Boolean).join(' · ') || '-'],
+          ['研判备注', 'note wrap-cell', 'note'], ['详情', 'short', 'detail']
+        ]
+      },
+      sql: {
+        title: 'SQL Server 应用日志',
+        description: '按实例、事件 ID、级别和消息查看 SQL Server 与 Agent 写入 Application 的事件。',
+        reminders: ['18456 常用于表示登录失败，需要结合 SQL 错误日志中的状态码进一步判断原因。', '没有 SQL 数据时先确认是否安装 SQL Server，以及 Application 日志是否仍保留对应时间段。'],
+        placeholder: '搜索 SQL 实例、事件 ID、Provider、级别、登录失败或错误消息',
+        empty: '没有 SQL Server 日志。若系统未安装 SQL Server，采集提示会明确说明。',
+        columns: [
+          ['时间', 'time', 'time'], ['风险', 'risk', 'risk'], ['实例', 'account', item => item.account || '-'],
+          ['事件 ID', 'event', item => item.eventId || '-'], ['Provider', 'provider', item => item.provider || item.source || '-'],
+          ['级别', 'short', item => item.level || '-'], ['消息', 'message wrap-cell', item => compact(commandOrMessage(item), 520)],
+          ['研判备注', 'note wrap-cell', 'note'], ['详情', 'short', 'detail']
+        ]
+      }
+    };
+
+    function metric(label, value, tone = '') {
+      return `<span class="count ${tone}">${escapeCell(label)} ${escapeCell(value)}</span>`;
+    }
+
+    function renderSummary(items) {
+      const high = items.filter(item => reviewFor(item, items).level === 'high').length;
+      const medium = items.filter(item => reviewFor(item, items).level === 'medium').length;
+      const metrics = [metric('当前结果', items.length), metric('高关注', high, high ? 'bad' : ''), metric('需核查', medium, medium ? 'warn' : '')];
+      if (activeTab === 'logon') {
+        metrics.push(metric('成功', items.filter(x => x.eventId === '4624').length, 'ok'));
+        metrics.push(metric('失败', items.filter(x => x.eventId === '4625').length, 'bad'));
+        metrics.push(metric('网络登录', items.filter(x => x.logonType === '3').length));
+        metrics.push(metric('RDP类型10', items.filter(x => x.logonType === '10').length, 'warn'));
+      } else if (activeTab === 'rdp') {
+        metrics.push(metric('NLA认证1149', items.filter(x => x.eventId === '1149').length));
+        metrics.push(metric('会话登录21', items.filter(x => x.eventId === '21').length, 'ok'));
+        metrics.push(metric('断开/注销', items.filter(x => ['23', '24', '39', '4779'].includes(x.eventId)).length));
+      } else if (activeTab === 'service') {
+        metrics.push(metric('可疑路径', items.filter(x => suspiciousServicePath(x.command)).length, 'bad'));
+      } else if (activeTab === 'user') {
+        metrics.push(metric('用户创建', items.filter(x => x.eventId === '4720').length, 'warn'));
+        metrics.push(metric('加入组', items.filter(x => ['4728', '4732', '4756'].includes(x.eventId)).length, 'bad'));
+      } else if (activeTab === 'powershell') {
+        metrics.push(metric('脚本块4104', items.filter(x => x.eventId === '4104').length));
+        metrics.push(metric('可疑命令', items.filter(x => {
+          const combinedContent = `${x.command || ''} ${x.message || ''} ${x.details || ''}`;
+          const primaryContent = x.command || x.message || x.details || '';
+          return !isWinTraceLensCollector(combinedContent) && suspiciousPowerShell(primaryContent);
+        }).length, 'bad'));
+      } else if (activeTab === 'sql') {
+        metrics.push(metric('登录失败', items.filter(x => /(18456|login failed|登录失败)/i.test(`${x.eventId} ${x.message}`)).length, 'bad'));
+      } else {
+        metrics.push(metric('登录失败', items.filter(x => x.eventId === '4625').length, 'bad'));
+        metrics.push(metric('RDP', items.filter(x => tabMatches(x, 'rdp')).length, 'warn'));
+        metrics.push(metric('服务创建', items.filter(x => tabMatches(x, 'service')).length, 'warn'));
+      }
+      summaryEl.innerHTML = metrics.join('');
+    }
+
+    function relevantErrors() {
+      if (activeTab === 'all') return collectionErrors;
+      const markers = {
+        logon: ['安全日志', 'Security'],
+        rdp: ['RDP', 'TerminalServices'],
+        service: ['服务创建', '7045'],
+        user: ['安全日志', 'Security'],
+        powershell: ['PowerShell'],
+        sql: ['SQL Server']
+      }[activeTab] || [];
+      return collectionErrors.filter(error => markers.some(marker => text(error).toLowerCase().includes(marker.toLowerCase())));
+    }
+
+    function renderContext() {
+      const view = viewDefinitions[activeTab] || viewDefinitions.all;
+      const errors = relevantErrors();
+      const reminders = [...view.reminders];
+      errors.forEach(error => reminders.push(`采集提示：${error}`));
+      viewContextEl.innerHTML = `
+        <div>
+          <h2 class="context-title">${escapeCell(view.title)}</h2>
+          <div class="context-text">${escapeCell(view.description)}</div>
+        </div>
+        <div class="context-reminders">${reminders.map((item, index) =>
+          `<span class="${index >= view.reminders.length ? 'collection-note' : ''}" title="${escapeCell(item)}">${escapeCell(item)}</span>`
+        ).join('')}</div>`;
+      filter.placeholder = view.placeholder;
+    }
+
+    function riskBadge(review) {
+      return `<span class="risk-badge ${escapeCell(review.level)}">${escapeCell(review.label)}</span>`;
+    }
+
+    function renderCell(column, item, review) {
+      const kind = column[2];
+      if (kind === 'risk') return riskBadge(review);
+      if (kind === 'note') return escapeCell(review.note);
+      if (kind === 'detail') return `<button class="row-detail" data-event-key="${escapeCell(item.__key)}">详情</button>`;
+      const value = typeof kind === 'function' ? kind(item) : item[kind];
+      return escapeCell(value || '-');
+    }
+
+    function defaultSortState(view) {
+      const riskIndex = view.columns.findIndex(column => column[2] === 'risk');
+      return { index: riskIndex >= 0 ? riskIndex : 0, direction: 'desc' };
+    }
+
+    function currentSortState(view) {
+      if (!sortByTab[activeTab]) {
+        sortByTab[activeTab] = defaultSortState(view);
+      }
+      return sortByTab[activeTab];
+    }
+
+    function riskRank(level) {
+      if (level === 'high') return 3;
+      if (level === 'medium') return 2;
+      return 1;
+    }
+
+    function sortValue(column, item, review) {
+      const kind = column[2];
+      if (kind === 'risk') return riskRank(review.level);
+      if (kind === 'note') return review.note;
+      if (typeof kind === 'function') return kind(item);
+      return item[kind];
+    }
+
+    function compareValues(left, right) {
+      const leftText = text(left).trim();
+      const rightText = text(right).trim();
+      if (!leftText && !rightText) return 0;
+      if (!leftText) return 1;
+      if (!rightText) return -1;
+      const leftNumber = Number(leftText);
+      const rightNumber = Number(rightText);
+      if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) {
+        return leftNumber - rightNumber;
+      }
+      return leftText.localeCompare(rightText, 'zh-CN', { numeric: true, sensitivity: 'base' });
+    }
+
+    function sortedItems(items, view, scopeItems) {
+      const state = currentSortState(view);
+      const column = view.columns[state.index] || view.columns[0];
+      const decorated = items.map((item, index) => ({
+        item,
+        index,
+        review: reviewFor(item, scopeItems)
+      }));
+      decorated.sort((left, right) => {
+        const leftValue = sortValue(column, left.item, left.review);
+        const rightValue = sortValue(column, right.item, right.review);
+        const leftEmpty = !text(leftValue).trim();
+        const rightEmpty = !text(rightValue).trim();
+        if (leftEmpty !== rightEmpty) return leftEmpty ? 1 : -1;
+        let result = compareValues(leftValue, rightValue);
+        if (state.direction === 'desc') result *= -1;
+        if (result !== 0) return result;
+        const timeResult = text(right.item.time).localeCompare(text(left.item.time));
+        return timeResult || left.index - right.index;
+      });
+      return decorated.map(entry => entry.item);
+    }
+
+    function sortIndicator(index, view) {
+      const state = currentSortState(view);
+      if (state.index !== index) return '↕';
+      return state.direction === 'asc' ? '↑' : '↓';
+    }
+
+    function renderHeader(column, index, view) {
+      if (column[2] === 'detail') {
+        return `<th class="${escapeCell(column[1])}">${escapeCell(column[0])}</th>`;
+      }
+      const state = currentSortState(view);
+      const ariaSort = state.index === index ? (state.direction === 'asc' ? 'ascending' : 'descending') : 'none';
+      return `<th class="${escapeCell(column[1])}" aria-sort="${ariaSort}">
+        <button class="sort-head" data-sort-index="${index}" title="按${escapeCell(column[0])}排序">
+          <span>${escapeCell(column[0])}</span><span class="sort-indicator">${sortIndicator(index, view)}</span>
+        </button>
+      </th>`;
+    }
+
+    function healthStatusTone(value) {
+      if (value === '可用') return 'ok';
+      if (value === '无事件' || value === '未启用') return 'warn';
+      return 'bad';
+    }
+
+    function renderHealth() {
+      const q = filter.value.trim();
+      const items = healthSources.filter(item => !q || window.wtlMatchesQuery(q, Object.values(item)));
       updateTabs();
-      renderSummary(items);
-      const tabTotal = events.filter(tabMatches).length;
-      const activeLabel = document.querySelector(`button.tab[data-tab="${activeTab}"]`)?.dataset.label || '全部';
-      statusEl.textContent = `${activeLabel} ${items.length} / ${tabTotal}`;
+      filter.placeholder = '搜索日志类别、来源、状态、事件 ID、详情或建议；支持 /正则/i';
+      viewContextEl.innerHTML = `
+        <div>
+          <h2 class="context-title">日志源可用性与审计状态</h2>
+          <div class="context-text">统一检查安全日志、RDP、PowerShell、Sysmon、WFP、防火墙、SQL Server 和 DNS 日志源是否可读取。</div>
+        </div>
+        <div class="context-reminders">
+          <span>“无事件”不等于没有发生相关行为，也可能是审计未启用、日志被覆盖或当前时间范围没有记录。</span>
+          <span>权限不足时请以管理员身份重新运行；不可用项按建议开启日志后再刷新。</span>
+        </div>`;
+      summaryEl.innerHTML = [
+        metric('来源', healthSummary.total || healthSources.length),
+        metric('可用', healthSummary.available || 0, 'ok'),
+        metric('无事件', healthSummary.noEvents || 0, 'warn'),
+        metric('不可用', healthSummary.unavailable || 0, 'bad'),
+        metric('权限不足', healthSummary.permissionIssue || 0, 'bad')
+      ].join('');
+      statusEl.textContent = `日志健康 ${items.length} / ${healthSources.length} · 生成时间 ${healthGeneratedAt || '-'}`;
+      exportCSV.disabled = healthSources.length === 0;
       if (!items.length) {
-        table.innerHTML = '<div class="empty">没有匹配的事件日志</div>';
+        table.innerHTML = '<div class="empty">没有匹配的日志源状态</div>';
         return;
       }
       table.innerHTML = `<table><thead><tr>
-        <th class="time">时间</th><th class="category">分类</th><th class="source">来源</th><th class="event">事件ID</th><th class="action">动作</th>
-        <th class="account">账户/实例</th><th class="short">域</th><th class="account">操作者</th><th class="short">登录类型</th><th class="logon">登录类型说明</th>
-        <th class="ip">来源 IP</th><th class="short">来源端口</th><th class="workstation">工作站</th><th class="process">进程</th>
-        <th class="service">服务名</th><th class="command">命令/路径</th><th class="short">认证包</th><th class="status-code">状态</th>
-        <th class="reason">失败原因</th><th class="sid">目标 SID</th><th class="provider">Provider</th><th class="short">级别</th>
-        <th class="message">消息</th><th class="details">详情</th>
-      </tr></thead><tbody>${items.map(x => `<tr>
-        <td class="time" title="${escapeCell(x.time)}">${escapeCell(x.time)}</td>
-        <td class="category" title="${escapeCell(x.category)}">${escapeCell(x.category)}</td>
-        <td class="source" title="${escapeCell(x.source)}">${escapeCell(x.source)}</td>
-        <td class="event" title="${escapeCell(x.eventId)}">${escapeCell(x.eventId)}</td>
-        <td class="action" title="${escapeCell(x.action)}">${escapeCell(x.action)}</td>
-        <td class="account" title="${escapeCell(x.account)}">${escapeCell(x.account)}</td>
-        <td class="short" title="${escapeCell(x.domain)}">${escapeCell(x.domain)}</td>
-        <td class="account" title="${escapeCell(x.subject)}">${escapeCell(x.subject)}</td>
-        <td class="short" title="${escapeCell(x.logonType)}">${escapeCell(x.logonType)}</td>
-        <td class="logon" title="${escapeCell(x.logonTypeName)}">${escapeCell(x.logonTypeName)}</td>
-        <td class="ip" title="${escapeCell(x.sourceIp)}">${escapeCell(x.sourceIp)}</td>
-        <td class="short" title="${escapeCell(x.sourcePort)}">${escapeCell(x.sourcePort)}</td>
-        <td class="workstation" title="${escapeCell(x.workstation)}">${escapeCell(x.workstation)}</td>
-        <td class="process" title="${escapeCell(x.process)}">${escapeCell(x.process)}</td>
-        <td class="service" title="${escapeCell(x.serviceName)}">${escapeCell(x.serviceName)}</td>
-        <td class="command" title="${escapeCell(x.command)}">${escapeCell(x.command)}</td>
-        <td class="short" title="${escapeCell(x.authPackage)}">${escapeCell(x.authPackage)}</td>
-        <td class="status-code" title="${escapeCell(x.status)}">${escapeCell(x.status)}</td>
-        <td class="reason" title="${escapeCell(x.failureReason)}">${escapeCell(x.failureReason)}</td>
-        <td class="sid" title="${escapeCell(x.targetSid)}">${escapeCell(x.targetSid)}</td>
-        <td class="provider" title="${escapeCell(x.provider)}">${escapeCell(x.provider)}</td>
-        <td class="short" title="${escapeCell(x.level)}">${escapeCell(x.level)}</td>
-        <td class="message" title="${escapeCell(x.message)}">${escapeCell(x.message)}</td>
-        <td class="details" title="${escapeCell(x.details)}">${escapeCell(x.details)}</td>
+        <th>类别</th><th>日志源</th><th>状态</th><th>日志名/来源</th><th>事件 ID</th><th>最后事件</th><th>记录数</th><th>详情</th><th>建议</th>
+      </tr></thead><tbody>${items.map(item => `<tr>
+        <td title="${escapeCell(item.category)}">${escapeCell(item.category || '-')}</td>
+        <td title="${escapeCell(item.name)}">${escapeCell(item.name || '-')}</td>
+        <td><span class="count ${healthStatusTone(item.status)}">${escapeCell(item.status || '-')}</span></td>
+        <td title="${escapeCell(item.logName)}">${escapeCell(item.logName || '-')}</td>
+        <td title="${escapeCell(item.eventIds)}">${escapeCell(item.eventIds || '-')}</td>
+        <td title="${escapeCell(item.lastEventTime)}">${escapeCell(item.lastEventTime || '-')}</td>
+        <td>${escapeCell(item.recordCount || 0)}</td>
+        <td class="wrap-cell" title="${escapeCell(item.details)}">${escapeCell(item.details || '-')}</td>
+        <td class="wrap-cell" title="${escapeCell(item.recommendation)}">${escapeCell(item.recommendation || '-')}</td>
       </tr>`).join('')}</tbody></table>`;
+    }
+
+    function render() {
+      if (activeTab === 'health') {
+        renderHealth();
+        return;
+      }
+      let items = visibleItems();
+      const scopeItems = events.filter(item => tabMatches(item));
+      const view = viewDefinitions[activeTab] || viewDefinitions.all;
+      buildReviewContext(scopeItems);
+      items = sortedItems(items, view, scopeItems);
+      updateTabs();
+      renderContext();
+      renderSummary(items);
+      const activeLabel = document.querySelector(`button.tab[data-tab="${activeTab}"]`)?.dataset.label || '全部';
+      const sortState = currentSortState(view);
+      const sortColumn = view.columns[sortState.index] || view.columns[0];
+      statusEl.textContent = `${activeLabel} ${items.length} / ${scopeItems.length} · ${sortColumn[0]}${sortState.direction === 'asc' ? '升序' : '降序'}`;
+      if (!items.length) {
+        table.innerHTML = `<table class="view-${escapeCell(activeTab)}"><thead><tr>${view.columns.map((column, index) =>
+          renderHeader(column, index, view)
+        ).join('')}</tr></thead><tbody><tr><td class="empty" colspan="${view.columns.length}">${escapeCell(view.empty)}</td></tr></tbody></table>`;
+        return;
+      }
+      table.innerHTML = `<table class="view-${escapeCell(activeTab)}"><thead><tr>${view.columns.map((column, index) =>
+        renderHeader(column, index, view)
+      ).join('')}</tr></thead><tbody>${items.map(item => {
+        const review = reviewFor(item, scopeItems);
+        return `<tr class="risk-${escapeCell(review.level)}">${view.columns.map(column =>
+          `<td class="${escapeCell(column[1])}" title="${column[2] === 'detail' ? '' : escapeCell(column[2] === 'note' ? review.note : (typeof column[2] === 'function' ? column[2](item) : item[column[2]]))}">${renderCell(column, item, review)}</td>`
+        ).join('')}</tr>`;
+      }).join('')}</tbody></table>`;
+    }
+
+    const detailFields = [
+      ['时间', 'time'], ['分类', 'category'], ['动作', 'action'], ['事件 ID', 'eventId'],
+      ['日志来源', 'source'], ['Provider', 'provider'], ['级别', 'level'], ['账户/实例', 'account'],
+      ['域', 'domain'], ['操作者', 'subject'], ['目标 SID', 'targetSid'], ['登录类型', 'logonType'],
+      ['登录类型说明', 'logonTypeName'], ['来源 IP', 'sourceIp'], ['来源端口', 'sourcePort'],
+      ['工作站', 'workstation'], ['进程', 'process'], ['服务名', 'serviceName'], ['命令/路径', 'command'],
+      ['认证包', 'authPackage'], ['状态', 'status'], ['失败原因', 'failureReason'], ['消息', 'message'], ['补充详情', 'details']
+    ];
+
+    function showEventDetail(key) {
+      const item = events.find(event => event.__key === key);
+      if (!item) return;
+      const review = reviewFor(item, events.filter(candidate => tabMatches(candidate, activeTab)));
+      const rows = [
+        ['研判级别', review.label],
+        ['研判备注', review.note],
+        ...detailFields.filter(([, field]) => text(item[field]).trim()).map(([label, field]) => [label, item[field]])
+      ];
+      detailTitleEl.textContent = `${item.action || item.category || '事件详情'} · ${item.time || ''}`;
+      detailContentEl.innerHTML = `<div class="detail-grid">${rows.map(([label, value]) =>
+        `<div>${escapeCell(label)}</div><div>${escapeCell(value)}</div>`
+      ).join('')}</div>`;
+      detailRawText = rows.map(([label, value]) => `${label}: ${value}`).join('\n');
+      detailOverlayEl.hidden = false;
+    }
+
+    function closeEventDetail() {
+      detailOverlayEl.hidden = true;
+      detailRawText = '';
     }
 
     async function loadJSON(url, options) {
@@ -391,11 +1029,9 @@
     }
 
     function downloadCSV(url) {
-      const a = document.createElement('a');
-      a.href = url;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
+      window.wtlDownload(url).catch(err => {
+        statusEl.textContent = `导出失败：${err.message || err}`;
+      });
     }
 
     function formatDate(date) {
@@ -432,9 +1068,11 @@
       return `${endDate.value} 之前`;
     }
 
-    function collectionQueryString() {
+    function collectionQueryString(force = false) {
       validateDateRange();
-      return appendDateRange(new URLSearchParams({ max: maxRecords.value || '300' })).toString();
+      const params = new URLSearchParams({ max: maxRecords.value || '300' });
+      if (force) params.set('refresh', '1');
+      return appendDateRange(params).toString();
     }
 
     function queryString() {
@@ -445,10 +1083,10 @@
       return appendDateRange(params).toString();
     }
 
-    async function load() {
+    async function load(force = false) {
       let params;
       try {
-        params = collectionQueryString();
+        params = collectionQueryString(force);
       } catch (err) {
         statusEl.textContent = err.message;
         table.innerHTML = `<div class="empty bad-text">${escapeCell(err.message)}</div>`;
@@ -459,15 +1097,28 @@
       summaryEl.innerHTML = '';
       table.innerHTML = `<div class="empty">正在读取 ${escapeCell(rangeText())} 的登录、RDP、服务、用户、PowerShell、SQL Server 相关事件，最多 ${escapeCell(maxRecords.value || '300')} 条...</div>`;
       const data = await loadJSON(`/api/security/events?${params}`);
-      events = data.events || [];
+      events = (data.events || []).map((item, index) => ({ ...item, __key: String(index) }));
       collectionErrors = data.collectionErrors || [];
       exportCSV.disabled = false;
       statusEl.textContent = `生成时间 ${data.generatedAt || ''}，范围 ${rangeText()}，事件 ${events.length}`;
       render();
     }
 
+    async function loadHealth(force = false) {
+      statusEl.textContent = '正在检查日志源...';
+      exportCSV.disabled = true;
+      summaryEl.innerHTML = '';
+      table.innerHTML = '<div class="empty">正在检查安全日志、Sysmon、WFP、防火墙、PowerShell、RDP、SQL Server 和 DNS 来源...</div>';
+      const data = await loadJSON(`/api/log/health${force ? '?refresh=1' : ''}`);
+      healthSources = data.sources || [];
+      healthSummary = data.summary || {};
+      healthGeneratedAt = data.generatedAt || '';
+      render();
+    }
+
     document.getElementById('refresh').addEventListener('click', () => {
-      load().catch(err => {
+      const loader = activeTab === 'health' ? loadHealth(true) : load(true);
+      loader.catch(err => {
         table.innerHTML = `<div class="empty bad-text">${escapeCell(err.message)}</div>`;
         statusEl.textContent = '加载失败';
       });
@@ -476,10 +1127,48 @@
     exportCSV.addEventListener('click', () => {
       try {
         statusEl.textContent = '正在生成 CSV...';
-        downloadCSV(`/api/security/events.csv?${queryString()}`);
+        if (activeTab === 'health') {
+          const q = filter.value.trim();
+          downloadCSV(`/api/log/health.csv${q ? `?q=${encodeURIComponent(q)}` : ''}`);
+        } else {
+          downloadCSV(`/api/security/events.csv?${queryString()}`);
+        }
       } catch (err) {
         statusEl.textContent = err.message;
       }
+    });
+
+    table.addEventListener('click', event => {
+      const sortButton = event.target.closest('button[data-sort-index]');
+      if (sortButton) {
+        const view = viewDefinitions[activeTab] || viewDefinitions.all;
+        const index = Number(sortButton.dataset.sortIndex);
+        const column = view.columns[index];
+        if (!column || column[2] === 'detail') return;
+        const current = currentSortState(view);
+        if (current.index === index) {
+          current.direction = current.direction === 'asc' ? 'desc' : 'asc';
+        } else {
+          current.index = index;
+          current.direction = column[2] === 'risk' || column[2] === 'time' ? 'desc' : 'asc';
+        }
+        render();
+        return;
+      }
+      const button = event.target.closest('button[data-event-key]');
+      if (button) showEventDetail(button.dataset.eventKey);
+    });
+    detailCloseEl.addEventListener('click', closeEventDetail);
+    detailCopyEl.addEventListener('click', async () => {
+      if (!detailRawText) return;
+      await navigator.clipboard.writeText(detailRawText);
+      statusEl.textContent = '事件原始信息已复制';
+    });
+    detailOverlayEl.addEventListener('click', event => {
+      if (event.target === detailOverlayEl) closeEventDetail();
+    });
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && !detailOverlayEl.hidden) closeEventDetail();
     });
 
     document.getElementById('range-1d').addEventListener('click', () => {
@@ -518,7 +1207,16 @@
     document.querySelectorAll('button.tab').forEach(btn => {
       btn.addEventListener('click', () => {
         activeTab = btn.dataset.tab;
-        render();
+        history.replaceState(null, '', activeTab === 'all' ? '/security.html' : `/security.html?tab=${encodeURIComponent(activeTab)}`);
+        closeEventDetail();
+        if (activeTab === 'health' && !healthSources.length) {
+          loadHealth(false).catch(err => {
+            table.innerHTML = `<div class="empty bad-text">${escapeCell(err.message)}</div>`;
+            statusEl.textContent = '检查失败';
+          });
+        } else {
+          render();
+        }
       });
     });
 
@@ -537,7 +1235,8 @@
     }));
 
     setRecentDays(7);
-    load().catch(err => {
+    const initialLoad = activeTab === 'health' ? loadHealth(false) : load(false);
+    initialLoad.catch(err => {
       table.innerHTML = `<div class="empty bad-text">${escapeCell(err.message)}</div>`;
       statusEl.textContent = '加载失败';
     });

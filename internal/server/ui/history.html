@@ -201,7 +201,7 @@
     .bad { color: var(--bad); }
   </style>
   <link rel="stylesheet" href="/nav.css">
-  <script src="/app.js" defer></script>
+  <script src="/app.js"></script>
 </head>
 <body>
   <header>
@@ -217,12 +217,12 @@
       <nav class="top-nav" aria-label="主要功能">
         <a class="nav-link" href="/">进程信息</a>
         <a class="nav-link" href="/host.html">主机信息</a>
-        <a class="nav-link" href="/findings.html">关注项</a>
+        <a class="nav-link" href="/findings.html">风险线索</a>
         <a class="nav-link" href="/threat.html">威胁分析</a>
+        <a class="nav-link" href="/investigation.html">案件调查</a>
         <a class="nav-link" href="/filetrace.html">文件痕迹</a>
         <a class="nav-link" aria-current="page" href="/history.html">历史通信</a>
         <a class="nav-link" href="/security.html">事件日志</a>
-        <a class="nav-link" href="/health.html">日志健康</a>
         <a class="nav-link" href="/yara.html">YARA扫描</a>
         <a class="nav-link" href="/ai.html">AI分析</a>
       </nav>
@@ -239,7 +239,7 @@
       </select>
       <button id="refresh">刷新历史记录</button>
       <button id="export-csv" class="secondary" disabled>导出 CSV</button>
-      <input id="filter" placeholder="按来源、进程、PID、地址、DNS、用户、详情过滤">
+      <input id="filter" placeholder="按来源、进程、PID、IP、域名过滤；支持 www.*.com、/正则/i">
       <span id="status" class="status">尚未加载</span>
     </div>
     <div class="tabs">
@@ -285,20 +285,21 @@
         return visibleLiveItems();
       }
       const tabItems = records.filter(tabMatches);
-      const q = filter.value.trim().toLowerCase();
+      const q = filter.value.trim();
       if (!q) return tabItems;
       return tabItems.filter(item => queryMatches(item, q));
     }
 
     function visibleLiveItems() {
-      const q = filter.value.trim().toLowerCase();
+      const q = filter.value.trim();
       if (!q) return liveRecords;
       return liveRecords.filter(item => queryMatches(item, q));
     }
 
     function queryMatches(item, q) {
-      const haystack = Object.values(item).map(v => text(v).toLowerCase()).join(' ');
-      return q.split(/\s+/).filter(Boolean).every(part => haystack.includes(part));
+      const values = Object.values(item);
+      if (window.wtlLooksLikeRegex(q)) return window.wtlMatchesQuery(q, values);
+      return q.split(/\s+/).filter(Boolean).every(part => window.wtlMatchesQuery(part, values));
     }
 
     function isConnectionRecord(item) {
@@ -415,11 +416,9 @@
     }
 
     function downloadCSV(url) {
-      const a = document.createElement('a');
-      a.href = url;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
+      window.wtlDownload(url).catch(err => {
+        statusEl.textContent = `导出失败：${err.message || err}`;
+      });
     }
 
     function queryString() {
@@ -437,21 +436,22 @@
       return params.toString();
     }
 
-    function loadQueryString() {
+    function loadQueryString(force = false) {
       const params = new URLSearchParams({ max: maxRecords.value || '1000' });
       if (startDate.value) params.set('start', startDate.value);
       if (endDate.value) params.set('end', endDate.value);
+      if (force) params.set('refresh', '1');
       return params.toString();
     }
 
-    async function load() {
+    async function load(force = false) {
       statusEl.textContent = '正在采集历史通信记录...';
       exportCSV.disabled = true;
       meta.innerHTML = '';
       table.innerHTML = '<div class="empty">正在采集 Sysmon、安全日志、防火墙日志、DNS Client 日志和 DNS 缓存...</div>';
       const [historyData, liveData] = await Promise.allSettled([
-        loadJSON(`/api/network/history?${loadQueryString()}`),
-        loadJSON('/api/network/live')
+        loadJSON(`/api/network/history?${loadQueryString(force)}`),
+        loadJSON(`/api/network/live${force ? '?refresh=1' : ''}`)
       ]);
       if (historyData.status !== 'fulfilled') {
         throw historyData.reason;
@@ -471,7 +471,7 @@
     }
 
     document.getElementById('refresh').addEventListener('click', () => {
-      load().catch(err => {
+      load(true).catch(err => {
         table.innerHTML = `<div class="empty bad">${escapeCell(err.message)}</div>`;
         statusEl.textContent = '加载失败';
       });
