@@ -73,6 +73,11 @@ func Collect(opts Options) ([]Info, error) {
 		toolhelpPIDs[entry.ProcessID] = struct{}{}
 	}
 	nativeProcesses, nativeErr := snapshotProcessesNative()
+	wmiProcesses, wmiErr := snapshotProcessesWMI()
+	createdByPID := make(map[uint32]time.Time, len(entries))
+	for _, entry := range entries {
+		createdByPID[entry.ProcessID] = queryProcessCreatedAt(entry.ProcessID)
+	}
 
 	hashCache := make(map[string]struct {
 		value string
@@ -90,7 +95,24 @@ func Collect(opts Options) ([]Info, error) {
 	items := make([]Info, 0, len(entries))
 	for _, entry := range entries {
 		path, pathErr := queryProcessPath(entry.ProcessID)
-		createdAt := queryProcessCreatedAt(entry.ProcessID)
+		createdAt := createdByPID[entry.ProcessID]
+		contextInfo := queryProcessContext(entry.ProcessID)
+		wmiInfo, inWMI := wmiProcesses[entry.ProcessID]
+		if contextInfo.CommandLine == "" {
+			contextInfo.CommandLine = wmiInfo.CommandLine
+		}
+		if contextInfo.ThreadCount == 0 {
+			contextInfo.ThreadCount = firstNonZeroUint32(entry.Threads, wmiInfo.ThreadCount)
+		}
+		if contextInfo.HandleCount == 0 {
+			contextInfo.HandleCount = wmiInfo.HandleCount
+		}
+		if contextInfo.WorkingSetBytes == 0 {
+			contextInfo.WorkingSetBytes = wmiInfo.WorkingSetBytes
+		}
+		if contextInfo.PrivateMemoryBytes == 0 {
+			contextInfo.PrivateMemoryBytes = wmiInfo.PrivateMemoryBytes
+		}
 		fileCreated, fileModified := fileTimes(path)
 
 		var md5Value, hashErr string
@@ -129,13 +151,32 @@ func Collect(opts Options) ([]Info, error) {
 				warning = "Toolhelp32 视图可见，但 NT 系统信息视图未发现；请排除进程瞬时退出或枚举链路被干扰"
 			}
 		}
+		if wmiErr == nil && inWMI {
+			sources += " + WMI 提供程序视图"
+		} else if wmiErr == nil && !inWMI && path != "" && !createdAt.IsZero() && time.Since(createdAt) > 5*time.Second {
+			warning = appendWarning(warning, "Toolhelp32 视图可见，但 WMI 提供程序视图未发现；请排除进程瞬时退出或提供程序延迟")
+		} else if wmiErr != nil {
+			sources += "；WMI 视图不可用"
+		}
 		items = append(items, Info{
 			PID:                entry.ProcessID,
 			Name:               names[entry.ProcessID],
 			ParentPID:          entry.ParentProcessID,
 			ParentName:         names[entry.ParentProcessID],
 			CreatedAt:          formatTime(createdAt),
+			ParentCreatedAt:    formatTime(createdByPID[entry.ParentProcessID]),
 			Path:               path,
+			CommandLine:        contextInfo.CommandLine,
+			UserName:           contextInfo.UserName,
+			UserSID:            contextInfo.UserSID,
+			SessionID:          contextInfo.SessionID,
+			IntegrityLevel:     contextInfo.IntegrityLevel,
+			Architecture:       contextInfo.Architecture,
+			Protection:         contextInfo.Protection,
+			ThreadCount:        contextInfo.ThreadCount,
+			HandleCount:        contextInfo.HandleCount,
+			PrivateMemoryBytes: contextInfo.PrivateMemoryBytes,
+			WorkingSetBytes:    contextInfo.WorkingSetBytes,
 			FileCreated:        formatTime(fileCreated),
 			FileModified:       formatTime(fileModified),
 			MD5:                md5Value,
@@ -155,13 +196,34 @@ func Collect(opts Options) ([]Info, error) {
 				continue
 			}
 			path, pathErr := queryProcessPath(pid)
+			contextInfo := queryProcessContext(pid)
+			wmiInfo, inWMI := wmiProcesses[pid]
+			mergeProcessContext(&contextInfo, wmiInfo)
+			if path == "" {
+				path = contextInfo.Path
+			}
+			sources := "NT 系统信息视图"
+			if wmiErr == nil && inWMI {
+				sources += " + WMI 提供程序视图"
+			}
 			items = append(items, Info{
 				PID:                pid,
 				Name:               firstNonEmpty(name, "[NT 枚举进程]"),
 				Path:               path,
+				CommandLine:        contextInfo.CommandLine,
+				UserName:           contextInfo.UserName,
+				UserSID:            contextInfo.UserSID,
+				SessionID:          contextInfo.SessionID,
+				IntegrityLevel:     contextInfo.IntegrityLevel,
+				Architecture:       contextInfo.Architecture,
+				Protection:         contextInfo.Protection,
+				ThreadCount:        contextInfo.ThreadCount,
+				HandleCount:        contextInfo.HandleCount,
+				PrivateMemoryBytes: contextInfo.PrivateMemoryBytes,
+				WorkingSetBytes:    contextInfo.WorkingSetBytes,
 				PathError:          pathErr,
 				ConnectionCount:    connectionCount[pid],
-				EnumerationSources: "NT 系统信息视图",
+				EnumerationSources: sources,
 				EnumerationWarning: "NT 系统信息视图可见，但 Toolhelp32 视图未发现；可能是进程创建/退出竞态，也可能存在枚举差异",
 			})
 		}
@@ -173,6 +235,9 @@ func Collect(opts Options) ([]Info, error) {
 				continue
 			}
 			if _, inNative := nativeProcesses[pid]; inNative {
+				continue
+			}
+			if _, inWMI := wmiProcesses[pid]; wmiErr == nil && inWMI {
 				continue
 			}
 			path, pathErr := queryProcessPath(pid)
@@ -188,11 +253,57 @@ func Collect(opts Options) ([]Info, error) {
 		}
 	}
 
+	if wmiErr == nil {
+		for pid, wmiInfo := range wmiProcesses {
+			if _, ok := toolhelpPIDs[pid]; ok {
+				continue
+			}
+			if _, ok := nativeProcesses[pid]; ok {
+				continue
+			}
+			contextInfo := queryProcessContext(pid)
+			mergeProcessContext(&contextInfo, wmiInfo)
+			items = append(items, Info{
+				PID: pid, Name: firstNonEmpty(contextInfo.Name, "[WMI 枚举进程]"),
+				ParentPID: contextInfo.ParentPID, ParentName: names[contextInfo.ParentPID],
+				Path: contextInfo.Path, CommandLine: contextInfo.CommandLine,
+				UserName: contextInfo.UserName, UserSID: contextInfo.UserSID,
+				SessionID: contextInfo.SessionID, IntegrityLevel: contextInfo.IntegrityLevel,
+				Architecture: contextInfo.Architecture, Protection: contextInfo.Protection,
+				ThreadCount: contextInfo.ThreadCount, HandleCount: contextInfo.HandleCount,
+				PrivateMemoryBytes: contextInfo.PrivateMemoryBytes, WorkingSetBytes: contextInfo.WorkingSetBytes,
+				ConnectionCount: connectionCount[pid], EnumerationSources: "WMI 提供程序视图",
+				EnumerationWarning: "WMI 提供程序视图可见，但 Toolhelp32 与 NT 系统信息视图均未发现；请优先核查，同时排除进程创建/退出竞态",
+			})
+		}
+	}
+
 	sort.Slice(items, func(i, j int) bool {
 		return items[i].PID < items[j].PID
 	})
 
 	return items, nil
+}
+
+func firstNonZeroUint32(values ...uint32) uint32 {
+	for _, value := range values {
+		if value != 0 {
+			return value
+		}
+	}
+	return 0
+}
+
+func appendWarning(current, value string) string {
+	current = strings.TrimSpace(current)
+	value = strings.TrimSpace(value)
+	if current == "" {
+		return value
+	}
+	if value == "" || strings.Contains(current, value) {
+		return current
+	}
+	return current + "；" + value
 }
 
 func firstNonEmpty(values ...string) string {

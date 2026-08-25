@@ -75,18 +75,29 @@ type taskXML struct {
 
 func Collect(opts Options) (Snapshot, error) {
 	var snapshot Snapshot
+	var wmiServices []psService
 
 	psData, err := collectPowerShellSnapshot()
 	if err != nil {
 		snapshot.CollectionErrors = append(snapshot.CollectionErrors, "PowerShell: "+err.Error())
 	} else {
-		snapshot.Services = servicesFromPS(psData.Services, opts)
+		wmiServices = psData.Services
 		snapshot.ScheduledTasks = tasksFromPS(psData.ScheduledTasks, opts)
 		snapshot.Users = psData.Users
 		snapshot.StartupItems = append(snapshot.StartupItems, startupFromPS(psData.StartupRegistry, opts)...)
 		snapshot.StartupItems = append(snapshot.StartupItems, startupFromPS(psData.StartupFolders, opts)...)
 		snapshot.ImageHijacks = hijacksFromPS(psData.ImageHijacks, opts)
 	}
+
+	scmServices, scmErr := collectSCMServices()
+	if scmErr != nil {
+		snapshot.CollectionErrors = append(snapshot.CollectionErrors, "SCM 服务枚举: "+scmErr.Error())
+	}
+	registryServices, registryErr := collectRegistryServices()
+	if registryErr != nil {
+		snapshot.CollectionErrors = append(snapshot.CollectionErrors, "Services 注册表枚举: "+registryErr.Error())
+	}
+	snapshot.Services = mergeServiceSources(wmiServices, scmServices, registryServices, opts)
 
 	if len(snapshot.ScheduledTasks) == 0 {
 		tasks, err := collectScheduledTasks(opts)
@@ -96,6 +107,10 @@ func Collect(opts Options) (Snapshot, error) {
 			snapshot.ScheduledTasks = tasks
 		}
 	}
+
+	wmiSubscriptions, wmiWarnings := collectWMISubscriptions(snapshot.Services, snapshot.ScheduledTasks, opts)
+	snapshot.WMISubscriptions = wmiSubscriptions
+	snapshot.CollectionErrors = append(snapshot.CollectionErrors, wmiWarnings...)
 
 	sort.Slice(snapshot.Services, func(i, j int) bool {
 		return strings.ToLower(snapshot.Services[i].Name) < strings.ToLower(snapshot.Services[j].Name)
@@ -722,5 +737,5 @@ func normalizeExecutablePath(path string, keepMissingAbsolute bool) string {
 }
 
 func (s Snapshot) Summary() string {
-	return fmt.Sprintf("services=%d tasks=%d startup=%d users=%d ifeo=%d", len(s.Services), len(s.ScheduledTasks), len(s.StartupItems), len(s.Users), len(s.ImageHijacks))
+	return fmt.Sprintf("services=%d tasks=%d startup=%d users=%d ifeo=%d wmi=%d", len(s.Services), len(s.ScheduledTasks), len(s.StartupItems), len(s.Users), len(s.ImageHijacks), len(s.WMISubscriptions))
 }

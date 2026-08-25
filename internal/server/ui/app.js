@@ -17,6 +17,7 @@
       ['/api/security', '正在读取事件日志'],
       ['/api/history', '正在采集历史通信'],
       ['/api/filetrace', '正在扫描文件痕迹'],
+      ['/api/registry', '正在分析注册表异常'],
       ['/api/investigation', '正在整理案件证据'],
       ['/api/ai', '正在进行 AI 分析'],
       ['/api/yara', '正在执行 YARA 扫描'],
@@ -174,6 +175,18 @@
     });
   }
 
+  function ensureRegistryNavigation() {
+	 document.querySelectorAll('.top-nav').forEach(nav => {
+	   if (nav.querySelector('a[href="/registry.html"]')) return;
+	   const link = document.createElement('a');
+	   link.className = 'nav-link';
+	   link.href = '/registry.html';
+	   link.textContent = '注册表异常';
+	   const fileTrace = nav.querySelector('a[href="/filetrace.html"]');
+	   nav.insertBefore(link, fileTrace || null);
+	 });
+  }
+
   function setPermission(info) {
     document.querySelectorAll('[data-admin-status]').forEach(node => {
       node.classList.remove('admin', 'limited', 'unknown');
@@ -205,8 +218,9 @@
   }
 
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', loadAbout);
+	 document.addEventListener('DOMContentLoaded', () => { ensureRegistryNavigation(); loadAbout(); });
   } else {
+	 ensureRegistryNavigation();
     loadAbout();
   }
 })();

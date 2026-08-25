@@ -153,7 +153,7 @@
     }
 
     .process-table {
-      min-width: 2150px;
+      min-width: 1880px;
     }
 
     .detail-table {
@@ -210,6 +210,18 @@
 
     .connections {
       width: 82px;
+    }
+
+    .metric {
+      width: 92px;
+    }
+
+    .account {
+      width: 190px;
+    }
+
+    .integrity {
+      width: 104px;
     }
 
     .actions {
@@ -501,11 +513,10 @@
             <tr>
               <th class="pid">PID</th>
               <th class="name">进程名称</th>
-              <th class="md5">MD5</th>
               <th class="signature">签名信息</th>
               <th class="connections">连接</th>
-              <th class="path" title="Toolhelp32 与 NT 系统信息是两个用户态视图，不代表能够发现 DKOM 隐藏进程">枚举视图/差异</th>
-              <th class="actions">操作</th>
+              <th class="account">运行账户</th>
+              <th class="integrity">完整性/位数</th>
               <th class="ppid">父 PID</th>
               <th class="parent">父进程</th>
               <th class="time">进程创建时间</th>
@@ -515,7 +526,7 @@
             </tr>
           </thead>
           <tbody id="rows">
-            <tr><td class="empty" colspan="13">正在加载进程...</td></tr>
+            <tr><td class="empty" colspan="12">正在加载进程...</td></tr>
           </tbody>
         </table>
       </div>
@@ -601,7 +612,10 @@
           p.pid, p.name, p.parentPid, p.parentName, p.createdAt,
           p.path, p.fileCreated, p.fileModified, p.md5, p.signature,
           p.signatureMsg, p.connectionCount, p.hashError, p.pathError,
-          p.enumerationSources, p.enumerationWarning
+          p.enumerationSources, p.enumerationWarning, p.commandLine,
+          p.userName, p.userSid, p.sessionId, p.integrityLevel,
+          p.architecture, p.protection, p.threadCount, p.handleCount,
+          p.privateMemoryBytes, p.workingSetBytes, p.parentCreatedAt
         ]));
       }
       if (connectionSort.value === 'desc') {
@@ -626,7 +640,7 @@
     }
 
     function kvRows(items) {
-      return items.map(([name, value]) => `<div>${escapeCell(name)}</div><div title="${escapeCell(value)}">${escapeCell(value || '-')}</div>`).join('');
+      return items.map(([name, value]) => { const display = value == null || value === '' ? '-' : value; return `<div>${escapeCell(name)}</div><div title="${escapeCell(display)}">${escapeCell(display)}</div>`; }).join('');
     }
 
     function processLine(p) {
@@ -634,31 +648,28 @@
       return `${p.name || '-'} | PID ${p.pid || '-'} | ${p.path || p.pathError || '-'}`;
     }
 
+    function formatMB(value) {
+      const bytes = Number(value || 0);
+      return bytes > 0 ? (bytes / 1024 / 1024).toFixed(1) : '';
+    }
+
     function renderRows() {
       const items = visibleItems();
       if (!items.length) {
-        rows.innerHTML = '<tr><td class="empty" colspan="13">没有匹配的进程</td></tr>';
+        rows.innerHTML = '<tr><td class="empty" colspan="12">没有匹配的进程</td></tr>';
         statusEl.textContent = `显示 0 / ${processes.length}`;
         return;
       }
 
       rows.innerHTML = items.map(p => {
-        const hashText = p.md5 || p.hashError || p.pathError || '';
-        const hashClass = p.md5 ? '' : (p.hashError || p.pathError ? 'warn' : '');
-        const copyDisabled = p.md5 ? '' : 'disabled';
-        const openDisabled = p.path ? '' : 'disabled';
         const selected = p.pid === selectedPid ? ' selected' : '';
         return `<tr class="${selected}" data-pid="${escapeCell(p.pid)}">
           <td class="pid" title="${escapeCell(p.pid)}">${escapeCell(p.pid)}</td>
           <td class="name" title="${escapeCell(p.name)}">${escapeCell(p.name)}</td>
-          <td class="md5 ${hashClass}" title="${escapeCell(hashText)}">${escapeCell(hashText)}</td>
           <td class="signature" title="${escapeCell(p.signatureMsg || p.signature)}">${renderSignature(p.signature, p.signatureMsg)}</td>
           <td class="connections" title="${escapeCell(p.connectionCount)}">${escapeCell(p.connectionCount || '')}</td>
-          <td class="path ${p.enumerationWarning ? 'warn' : ''}" title="${escapeCell(p.enumerationWarning || p.enumerationSources)}">${escapeCell(p.enumerationWarning || p.enumerationSources)}</td>
-          <td class="actions">
-            <button class="mini" data-action="copy-md5" data-pid="${escapeCell(p.pid)}" ${copyDisabled}>复制</button>
-            <button class="mini secondary" data-action="open-path" data-pid="${escapeCell(p.pid)}" ${openDisabled}>位置</button>
-          </td>
+          <td class="account" title="${escapeCell((p.userName || '') + ' ' + (p.userSid || ''))}">${escapeCell(p.userName || p.userSid || '')}</td>
+          <td class="integrity" title="会话 ${escapeCell(p.sessionId)}；${escapeCell(p.protection || '')}">${escapeCell([p.integrityLevel, p.architecture].filter(Boolean).join(' / '))}</td>
           <td class="ppid" title="${escapeCell(p.parentPid)}">${escapeCell(p.parentPid)}</td>
           <td class="parent" title="${escapeCell(p.parentName)}">${escapeCell(p.parentName)}</td>
           <td class="time" title="${escapeCell(p.createdAt)}">${escapeCell(p.createdAt)}</td>
@@ -747,6 +758,18 @@
             ['父 PID', p.parentPid],
             ['父进程', p.parentName],
             ['创建时间', p.createdAt],
+            ['父进程创建时间', p.parentCreatedAt],
+            ['完整命令行', p.commandLine],
+            ['运行账户', p.userName],
+            ['用户 SID', p.userSid],
+            ['会话 ID', p.sessionId],
+            ['完整性级别', p.integrityLevel],
+            ['进程位数', p.architecture],
+            ['保护状态', p.protection],
+            ['线程数', p.threadCount],
+            ['句柄数', p.handleCount],
+            ['私有内存', formatMB(p.privateMemoryBytes) ? `${formatMB(p.privateMemoryBytes)} MB` : ''],
+            ['工作集', formatMB(p.workingSetBytes) ? `${formatMB(p.workingSetBytes)} MB` : ''],
             ['MD5', p.md5 || p.hashError],
             ['签名', p.signature],
             ['签名说明', p.signatureMsg],
@@ -1091,20 +1114,6 @@
     });
 
     rows.addEventListener('click', event => {
-      const button = event.target.closest('button[data-action]');
-      if (button) {
-        event.stopPropagation();
-        const pid = Number(button.dataset.pid);
-        const p = processes.find(item => item.pid === pid);
-        if (button.dataset.action === 'copy-md5' && p && p.md5) {
-          copyText(p.md5, `已复制 MD5: ${p.md5}`);
-        }
-        if (button.dataset.action === 'open-path') {
-          openPath(pid).catch(err => statusEl.textContent = err.message);
-        }
-        return;
-      }
-
       const tr = event.target.closest('tr[data-pid]');
       if (!tr) return;
       selectProcess(Number(tr.dataset.pid)).catch(err => {

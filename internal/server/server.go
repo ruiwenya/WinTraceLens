@@ -24,6 +24,7 @@ import (
 	"github.com/ruiwenya/WinTraceLens/internal/host"
 	"github.com/ruiwenya/WinTraceLens/internal/memoryscan"
 	"github.com/ruiwenya/WinTraceLens/internal/process"
+	"github.com/ruiwenya/WinTraceLens/internal/registryanomaly"
 	"github.com/ruiwenya/WinTraceLens/internal/runtimeinfo"
 	"github.com/ruiwenya/WinTraceLens/internal/securitylog"
 	"github.com/ruiwenya/WinTraceLens/internal/systemtools"
@@ -71,16 +72,21 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/processes.csv", s.handleProcessesCSV)
 	mux.HandleFunc("/api/process/", s.handleProcessAction)
 	mux.HandleFunc("/api/host", s.handleHost)
+	mux.HandleFunc("/api/host/service-scripts", s.handleServiceScripts)
 	mux.HandleFunc("/api/host.csv", s.handleHostCSV)
 	mux.HandleFunc("/api/findings", s.handleFindings)
 	mux.HandleFunc("/api/findings.csv", s.handleFindingsCSV)
 	mux.HandleFunc("/api/threat/memory", s.handleThreatMemory)
 	mux.HandleFunc("/api/threat/memory.csv", s.handleThreatMemoryCSV)
+	mux.HandleFunc("/api/threat/memory/export", s.handleThreatMemoryExport)
 	mux.HandleFunc("/api/threat/behavior", s.handleThreatBehavior)
 	mux.HandleFunc("/api/threat/behavior.csv", s.handleThreatBehaviorCSV)
 	mux.HandleFunc("/api/threat/drivers", s.handleThreatDrivers)
 	mux.HandleFunc("/api/threat/drivers.csv", s.handleThreatDriversCSV)
 	mux.HandleFunc("/api/threat/driver-checks.csv", s.handleThreatDriverChecksCSV)
+	mux.HandleFunc("/api/registry/anomalies", s.handleRegistryAnomalies)
+	mux.HandleFunc("/api/registry/anomalies.csv", s.handleRegistryAnomaliesCSV)
+	mux.HandleFunc("/api/registry/export", s.handleRegistryExport)
 	mux.HandleFunc("/api/files/traces", s.handleFileTraces)
 	mux.HandleFunc("/api/files/traces.csv", s.handleFileTracesCSV)
 	mux.HandleFunc("/api/network/history", s.handleNetworkHistory)
@@ -162,14 +168,17 @@ func (s *Server) handleHostCSV(w http.ResponseWriter, r *http.Request) {
 		rows := make([][]string, 0, len(snapshot.Services))
 		for _, item := range snapshot.Services {
 			row := []string{
+				item.RiskLevel, strconv.Itoa(item.RiskScore), strings.Join(item.RiskReasons, "；"), item.SourceStatus,
 				item.Name, item.DisplayName, item.State, item.StartMode, item.Account,
-				item.MD5, item.Signature, item.SignatureMsg, item.Path, item.Command, item.HashError,
+				item.MD5, item.Signature, item.SignatureMsg, item.Path, item.FileStatus, item.Command,
+				item.SCMPath, item.RegistryImagePath, item.WMIPath, item.RegistryPath, item.ServiceDLL,
+				item.ServiceDLLSignature, item.ServiceDLLSigMsg, item.HashError,
 			}
 			if matchesCSVQuery(q, row) {
 				rows = append(rows, row)
 			}
 		}
-		writeCSV(w, "host-services", []string{"服务名", "显示名", "状态", "启动", "账户", "MD5", "签名", "签名说明", "路径", "命令", "错误"}, rows)
+		writeCSV(w, "host-services", []string{"风险", "评分", "风险原因", "来源状态", "服务名", "显示名", "状态", "启动", "账户", "MD5", "签名", "签名说明", "路径", "文件状态", "命令", "SCM路径", "注册表ImagePath", "WMI PathName", "注册表项", "ServiceDLL", "ServiceDLL签名", "ServiceDLL签名说明", "错误"}, rows)
 	case "tasks":
 		rows := make([][]string, 0, len(snapshot.ScheduledTasks))
 		for _, item := range snapshot.ScheduledTasks {
@@ -212,6 +221,27 @@ func (s *Server) handleHostCSV(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		writeCSV(w, "host-ifeo", []string{"目标镜像", "Debugger MD5", "签名", "签名说明", "Debugger 路径", "Debugger", "注册表路径", "错误"}, rows)
+	case "wmi":
+		rows := make([][]string, 0, len(snapshot.WMISubscriptions))
+		for _, item := range snapshot.WMISubscriptions {
+			row := []string{
+				item.RiskLevel, strconv.Itoa(item.RiskScore), strings.Join(item.RiskReasons, "；"), strconv.FormatBool(item.SystemManaged), item.Summary, item.Namespace, item.Status,
+				item.FilterName, item.QueryLanguage, item.EventNamespace, item.Query, item.FilterCreatorSID,
+				item.ConsumerName, item.ConsumerType, item.CommandLine, item.ExecutablePath, item.ExecutableMD5,
+				item.ExecutableSignature, item.ExecutableSigMsg, item.ExecutableHashErr, item.ScriptText, item.ConsumerDetails,
+				strconv.FormatBool(item.RunInteractively), item.ConsumerCreatorSID, item.BindingCreatorSID,
+				strings.Join(item.RelatedServices, "；"), strings.Join(item.RelatedTasks, "；"),
+				item.FilterPath, item.ConsumerPath, item.BindingPath,
+			}
+			if matchesCSVQuery(q, row) {
+				rows = append(rows, row)
+			}
+		}
+		writeCSV(w, "host-wmi-subscriptions", []string{
+			"风险", "评分", "风险原因", "系统内置", "判定说明", "命名空间", "状态", "过滤器", "查询语言", "事件命名空间", "WQL 查询", "过滤器 CreatorSID",
+			"消费者", "消费者类型", "命令行", "可执行路径", "MD5", "签名", "签名说明", "哈希错误", "脚本内容", "消费者详情",
+			"交互运行", "消费者 CreatorSID", "绑定 CreatorSID", "关联服务", "关联任务", "过滤器路径", "消费者路径", "绑定路径",
+		}, rows)
 	default:
 		http.Error(w, "unknown host csv tab", http.StatusBadRequest)
 	}
@@ -308,7 +338,7 @@ func (s *Server) handleThreatMemoryCSV(w http.ResponseWriter, r *http.Request) {
 			rows = append(rows, row)
 		}
 	}
-	writeCSV(w, "threat-memory", []string{"级别", "分类", "PID", "进程", "路径", "原因", "基址/入口", "大小", "保护属性", "内存类型", "线程ID", "上下文", "详情"}, rows)
+	writeCSV(w, "threat-memory", []string{"级别", "分类", "PID", "进程", "路径", "原因", "基址/入口", "区域基址", "大小", "保护属性", "初始保护属性", "内存类型", "后备文件", "线程ID", "SHA256", "哈希范围", "熵", "MZ", "有效PE", "硬信号", "字符串预览", "上下文", "详情"}, rows)
 }
 
 func (s *Server) handleThreatBehavior(w http.ResponseWriter, r *http.Request) {
@@ -417,7 +447,7 @@ func (s *Server) handleFileTraces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	snapshot.Records = filterFileTraceRecords(snapshot.Records, r.URL.Query().Get("category"), r.URL.Query().Get("q"))
+	snapshot.Records = filterFileTraceRecords(snapshot.Records, r.URL.Query().Get("category"), r.URL.Query().Get("source"), r.URL.Query().Get("q"))
 	writeJSON(w, snapshot)
 }
 
@@ -434,15 +464,16 @@ func (s *Server) handleFileTracesCSV(w http.ResponseWriter, r *http.Request) {
 	}
 
 	category := r.URL.Query().Get("category")
+	source := r.URL.Query().Get("source")
 	q := r.URL.Query().Get("q")
 	rows := make([][]string, 0, len(snapshot.Records))
 	for _, item := range snapshot.Records {
 		row := fileTraceRecordRow(item)
-		if fileTraceCategoryMatches(item, category) && matchesCSVQuery(q, row) {
+		if fileTraceCategoryMatches(item, category) && fileTraceSourceMatches(item, source) && matchesCSVQuery(q, row) {
 			rows = append(rows, row)
 		}
 	}
-	writeCSV(w, "file-traces", []string{"分类", "来源", "名称", "路径", "目录", "扩展名", "大小", "创建时间", "修改时间", "访问时间", "最近运行", "运行次数", "可疑等级", "原因", "详情", "Schema", "SHA1", "Publisher", "产品", "产品版本", "BinaryType", "ProgramId", "应用关联", "Amcache记录时间", "时间语义", "PE链接时间", "当前签名", "签名说明"}, rows)
+	writeCSV(w, "file-traces", []string{"分类", "来源", "名称", "路径", "目录", "扩展名", "大小", "创建时间", "修改时间", "访问时间", "最近运行", "运行次数", "可疑等级", "原因", "详情", "Schema", "SHA1", "SHA256", "Magic", "熵", "文件属性", "关联服务", "Publisher", "产品", "产品版本", "BinaryType", "ProgramId", "应用关联", "Amcache记录时间", "时间语义", "PE链接时间", "当前签名", "签名说明"}, rows)
 }
 
 func (s *Server) handleNetworkHistory(w http.ResponseWriter, r *http.Request) {
@@ -992,7 +1023,19 @@ func (s *Server) collectFindings(force bool) ([]analysis.Finding, string, error)
 		return nil, "", fmt.Errorf("host collection: %w", err)
 	}
 
-	return analysis.BuildFindings(processes, hostSnapshot), hostSnapshot.Summary(), nil
+	findings := analysis.BuildFindings(processes, hostSnapshot)
+	summary := hostSnapshot.Summary()
+	registrySnapshot, registryErr := s.evidenceStore.Registry(registryanomaly.Options{
+		MaxRecords: 300, MaxKeys: 5000, MaxValues: 25000, MaxDepth: 5,
+		MaxDataSize: 4 * 1024 * 1024, Timeout: 8 * time.Second,
+	}, force)
+	if registryErr != nil {
+		summary += "；注册表异常采集失败: " + registryErr.Error()
+	} else {
+		registrySnapshot = registryanomaly.Correlate(registrySnapshot, processes, hostSnapshot)
+		findings = append(findings, analysis.RegistryFindings(registrySnapshot)...)
+	}
+	return findings, summary, nil
 }
 
 func (s *Server) threatBehaviorSnapshot(opts threatanalysis.Options, force bool) (threatanalysis.Snapshot, error) {
@@ -1130,6 +1173,17 @@ func (s *Server) handleProcessesCSV(w http.ResponseWriter, r *http.Request) {
 		row := []string{
 			strconv.FormatUint(uint64(item.PID), 10),
 			item.Name,
+			item.CommandLine,
+			item.UserName,
+			item.UserSID,
+			strconv.FormatUint(uint64(item.SessionID), 10),
+			item.IntegrityLevel,
+			item.Architecture,
+			item.Protection,
+			strconv.FormatUint(uint64(item.ThreadCount), 10),
+			strconv.FormatUint(uint64(item.HandleCount), 10),
+			strconv.FormatUint(item.PrivateMemoryBytes, 10),
+			strconv.FormatUint(item.WorkingSetBytes, 10),
 			item.MD5,
 			item.Signature,
 			item.SignatureMsg,
@@ -1137,6 +1191,7 @@ func (s *Server) handleProcessesCSV(w http.ResponseWriter, r *http.Request) {
 			strconv.FormatUint(uint64(item.ParentPID), 10),
 			item.ParentName,
 			item.CreatedAt,
+			item.ParentCreatedAt,
 			item.Path,
 			item.FileCreated,
 			item.FileModified,
@@ -1148,7 +1203,7 @@ func (s *Server) handleProcessesCSV(w http.ResponseWriter, r *http.Request) {
 			rows = append(rows, row)
 		}
 	}
-	writeCSV(w, "process-md5", []string{"PID", "进程名称", "MD5", "签名信息", "签名说明", "连接数", "父PID", "父进程", "进程创建时间", "可执行文件路径", "文件创建时间", "文件修改时间", "错误", "枚举视图", "枚举差异"}, rows)
+	writeCSV(w, "process-md5", []string{"PID", "进程名称", "完整命令行", "用户名", "用户SID", "会话ID", "完整性级别", "进程位数", "保护状态", "线程数", "句柄数", "私有内存字节", "工作集字节", "MD5", "签名信息", "签名说明", "连接数", "父PID", "父进程", "进程创建时间", "父进程创建时间", "可执行文件路径", "文件创建时间", "文件修改时间", "错误", "枚举视图", "枚举差异"}, rows)
 }
 
 func (s *Server) handleModules(w http.ResponseWriter, pid uint32) {
@@ -1428,10 +1483,20 @@ func memoryRecordRow(item memoryscan.Record) []string {
 		item.Path,
 		item.Reason,
 		item.Base,
+		item.RegionBase,
 		strconv.FormatUint(item.Size, 10),
 		item.Protect,
+		item.AllocationProtect,
 		item.MemoryType,
+		item.BackingFile,
 		strconv.FormatUint(uint64(item.ThreadID), 10),
+		item.SHA256,
+		item.HashScope,
+		fmt.Sprintf("%.2f", item.Entropy),
+		strconv.FormatBool(item.HasMZ),
+		strconv.FormatBool(item.HasPE),
+		strings.Join(item.HardSignals, "；"),
+		item.StringsPreview,
 		item.Context,
 		item.Details,
 	}
@@ -1514,14 +1579,44 @@ func hoursFromRequest(r *http.Request) int {
 	return hours
 }
 
-func filterFileTraceRecords(items []filetrace.Record, category, q string) []filetrace.Record {
+func filterFileTraceRecords(items []filetrace.Record, category, source, q string) []filetrace.Record {
 	filtered := make([]filetrace.Record, 0, len(items))
 	for _, item := range items {
-		if fileTraceCategoryMatches(item, category) && matchesCSVQuery(q, fileTraceRecordRow(item)) {
+		if fileTraceCategoryMatches(item, category) && fileTraceSourceMatches(item, source) && matchesCSVQuery(q, fileTraceRecordRow(item)) {
 			filtered = append(filtered, item)
 		}
 	}
 	return filtered
+}
+
+func fileTraceSourceMatches(item filetrace.Record, source string) bool {
+	value := strings.ToLower(strings.TrimSpace(item.Source))
+	switch strings.ToLower(strings.TrimSpace(source)) {
+	case "", "all":
+		return true
+	case "ntfs":
+		return strings.Contains(value, "mft") || strings.Contains(value, "usn")
+	case "prefetch":
+		return strings.Contains(value, "prefetch")
+	case "amcache":
+		return strings.Contains(value, "amcache")
+	case "shimcache":
+		return strings.Contains(value, "shimcache")
+	case "srum":
+		return strings.Contains(value, "srum")
+	case "lnk":
+		return strings.Contains(value, "recent") || strings.Contains(value, "jumplist")
+	case "userassist":
+		return strings.Contains(value, "userassist") || strings.Contains(value, "pca")
+	case "powershell":
+		return strings.Contains(value, "powershell")
+	case "native":
+		return strings.Contains(value, "go 原生落地点")
+	case "structure":
+		return strings.Contains(value, "敏感文件结构")
+	default:
+		return true
+	}
 }
 
 func fileTraceCategoryMatches(item filetrace.Record, category string) bool {
@@ -1537,13 +1632,15 @@ func fileTraceCategoryMatches(item filetrace.Record, category string) bool {
 			return true
 		}
 		switch item.Category {
-		case "执行痕迹", "命令历史", "NTFS 元数据", "NTFS 变更痕迹", "网络与应用痕迹", "取证源状态":
+		case "执行痕迹", "命令历史", "NTFS 元数据", "NTFS 变更痕迹", "网络与应用痕迹", "取证源状态", "文件结构异常":
 			return true
 		default:
 			return false
 		}
 	case "temp":
 		return item.Category == "Temp 临时文件"
+	case "structure":
+		return item.Category == "文件结构异常"
 	case "suspicious":
 		return strings.TrimSpace(item.Suspicion) != ""
 	default:
@@ -1570,6 +1667,11 @@ func fileTraceRecordRow(item filetrace.Record) []string {
 		item.Details,
 		item.Schema,
 		item.SHA1,
+		item.SHA256,
+		item.Magic,
+		fmt.Sprintf("%.2f", item.Entropy),
+		item.Attributes,
+		strings.Join(item.RelatedServices, "；"),
 		item.Publisher,
 		item.ProductName,
 		item.ProductVersion,

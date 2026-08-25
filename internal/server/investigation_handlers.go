@@ -14,6 +14,7 @@ import (
 	"github.com/ruiwenya/WinTraceLens/internal/host"
 	"github.com/ruiwenya/WinTraceLens/internal/investigation"
 	"github.com/ruiwenya/WinTraceLens/internal/process"
+	"github.com/ruiwenya/WinTraceLens/internal/registryanomaly"
 	"github.com/ruiwenya/WinTraceLens/internal/securitylog"
 )
 
@@ -134,6 +135,12 @@ func (s *Server) investigationSnapshot(r *http.Request) (investigation.Snapshot,
 		sources.Drivers, sources.DriverError = s.evidenceStore.Drivers(driveranalysis.Options{HashLimitBytes: s.options.HashLimitBytes, MaxRecords: driverLimit}, force)
 	})
 	run(func() { sources.Connections, sources.ConnectionError = s.evidenceStore.Connections(force) })
+	run(func() {
+		sources.Registry, sources.RegistryError = s.evidenceStore.Registry(registryanomaly.Options{
+			MaxRecords: sourceLimit, MaxKeys: 6000, MaxValues: 30000, MaxDepth: 5,
+			MaxDataSize: 4 * 1024 * 1024, Timeout: 10 * time.Second,
+		}, force)
+	})
 	wg.Wait()
 	snapshot := investigation.Build(opts, sources)
 	s.investigationCache = map[string]investigationCacheEntry{

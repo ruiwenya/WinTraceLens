@@ -6,7 +6,19 @@ type Info struct {
 	ParentPID          uint32 `json:"parentPid"`
 	ParentName         string `json:"parentName"`
 	CreatedAt          string `json:"createdAt"`
+	ParentCreatedAt    string `json:"parentCreatedAt"`
 	Path               string `json:"path"`
+	CommandLine        string `json:"commandLine"`
+	UserName           string `json:"userName"`
+	UserSID            string `json:"userSid"`
+	SessionID          uint32 `json:"sessionId"`
+	IntegrityLevel     string `json:"integrityLevel"`
+	Architecture       string `json:"architecture"`
+	Protection         string `json:"protection"`
+	ThreadCount        uint32 `json:"threadCount"`
+	HandleCount        uint32 `json:"handleCount"`
+	PrivateMemoryBytes uint64 `json:"privateMemoryBytes"`
+	WorkingSetBytes    uint64 `json:"workingSetBytes"`
 	FileCreated        string `json:"fileCreated"`
 	FileModified       string `json:"fileModified"`
 	MD5                string `json:"md5"`

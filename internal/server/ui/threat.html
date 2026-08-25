@@ -76,18 +76,21 @@
     label.toggle {
       display: inline-flex;
       align-items: center;
-      gap: 6px;
-      height: 34px;
-      padding: 0 8px;
+      flex: 0 0 auto;
+      gap: 5px;
+      height: 30px;
+      padding: 0 7px;
       border: 1px solid var(--line);
       border-radius: 4px;
       background: #fff;
+      font-size: 13px;
       white-space: nowrap;
     }
     label.toggle input {
-      width: 16px;
-      height: 16px;
+      width: 14px;
+      height: 14px;
       padding: 0;
+      margin: 0;
     }
     button {
       display: inline-flex;
@@ -155,6 +158,14 @@
       border-collapse: collapse;
       table-layout: fixed;
     }
+    table.memory-table { min-width: 2100px; }
+    .memory-table .category { width: 110px; }
+    .memory-table .process { width: 150px; }
+    .memory-table .reason { width: 220px; }
+    .memory-table .context { width: 180px; }
+    .memory-table .path { width: 320px; }
+    .memory-table .preview { width: 260px; }
+    .memory-table .action { width: 130px; }
     th, td {
       border-bottom: 1px solid var(--line-soft);
       padding: 8px 10px;
@@ -191,6 +202,9 @@
     .reason { width: 280px; }
     .context { width: 230px; }
     .details { width: 420px; }
+	.hash { width: 460px; font-family: Consolas, "Courier New", monospace; }
+	.preview { width: 360px; }
+	.action { width: 145px; }
     .empty {
       padding: 18px;
       color: var(--muted);
@@ -286,6 +300,15 @@
     th.sortable { cursor: pointer; user-select: none; }
     th.sortable:hover { background: #dfeaf4; }
     .sort-mark { color: var(--accent); }
+	dialog { width: min(980px, calc(100vw - 40px)); max-height: calc(100vh - 60px); padding: 0; border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 16px 48px rgba(20,38,62,.28); }
+	dialog::backdrop { background: rgba(16,28,42,.42); }
+	.dialog-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 14px; border-bottom:1px solid var(--line); background:var(--head-2); }
+	.dialog-head h2 { margin:0; font-size:16px; }
+	.dialog-body { max-height: calc(100vh - 150px); overflow:auto; padding:14px; }
+	.dialog-grid { display:grid; grid-template-columns: 160px minmax(0,1fr); gap:1px; border:1px solid var(--line); background:var(--line); }
+	.dialog-grid dt,.dialog-grid dd { margin:0; padding:8px 10px; background:#fff; overflow-wrap:anywhere; }
+	.dialog-grid dt { color:var(--muted); font-weight:600; }
+	.dialog-code { margin-top:12px; padding:10px; overflow:auto; border:1px solid var(--line); background:#f7f9fc; font:12px/1.55 Consolas,"Courier New",monospace; white-space:pre-wrap; overflow-wrap:anywhere; }
   </style>
   <link rel="stylesheet" href="/nav.css">
   <script src="/app.js"></script>
@@ -327,7 +350,7 @@
         <option value="160">进程 160</option>
         <option value="300" selected>进程 300</option>
       </select>
-      <label class="toggle"><input id="include-threads" type="checkbox" checked>线程入口</label>
+      <label class="toggle" title="开启后额外枚举线程起始地址；仅异常入口会增加结果"><input id="include-threads" type="checkbox" checked>线程入口</label>
       <input id="filter" placeholder="按进程、PID、路径、原因过滤；支持 /正则/i">
       <span id="status" class="status">尚未加载</span>
     </div>
@@ -363,6 +386,11 @@
     </section>
   </main>
 
+  <dialog id="memory-detail-dialog">
+	<div class="dialog-head"><h2 id="memory-detail-title">内存区域详情</h2><button id="memory-detail-close" class="secondary">关闭</button></div>
+	<div id="memory-detail-body" class="dialog-body"></div>
+  </dialog>
+
   <script>
     const table = document.getElementById('table');
     const filter = document.getElementById('filter');
@@ -386,6 +414,9 @@
     let driverSourceCounts = {};
     let driverRiskFilter = 'all';
     let driverSort = { key: 'score', direction: 'desc' };
+	let memorySort = { key: 'level', direction: 'desc' };
+	const memoryDialog = document.getElementById('memory-detail-dialog');
+	const memoryDialogBody = document.getElementById('memory-detail-body');
 
     function text(value) {
       return value == null ? '' : String(value);
@@ -424,6 +455,8 @@
       if (activeTab === 'drivers') {
         items = items.filter(matchesDriverRiskFilter);
         items = sortDriverRows(items);
+	  } else {
+		items = sortMemoryRows(items);
       }
       if (!q) return items;
       return items.filter(item => window.wtlMatchesQuery(q, Object.values(item)));
@@ -461,17 +494,43 @@
       return `<th class="${className || ''} sortable" data-sort="${key}" title="单击按${escapeCell(label)}排序">${escapeCell(label)}<span class="sort-mark">${mark}</span></th>`;
     }
 
+	function memorySortValue(item, key) {
+	  if (['size', 'entropy', 'pid'].includes(key)) return Number(item[key] || 0);
+	  if (key === 'level') return ({ '高': 3, '中': 2, '低': 1 }[item.level] || 0);
+	  return text(item[key]).toLowerCase();
+	}
+
+	function sortMemoryRows(items) {
+	  const direction = memorySort.direction === 'asc' ? 1 : -1;
+	  return [...items].sort((a, b) => {
+		const av = memorySortValue(a, memorySort.key), bv = memorySortValue(b, memorySort.key);
+		if (av < bv) return -1 * direction;
+		if (av > bv) return 1 * direction;
+		return Number(a.pid || 0) - Number(b.pid || 0);
+	  });
+	}
+
+	function memoryHeader(label, key, className) {
+	  const active = memorySort.key === key;
+	  const mark = active ? (memorySort.direction === 'asc' ? ' ↑' : ' ↓') : '';
+	  return `<th class="${className || ''} sortable" data-memory-sort="${key}" title="单击按${escapeCell(label)}排序">${escapeCell(label)}<span class="sort-mark">${mark}</span></th>`;
+	}
+
     function renderSummary() {
       const items = activeTab === 'memory' ? memoryRecords : driverItems;
       const high = items.filter(x => x.level === '高').length;
       const medium = items.filter(x => x.level === '中').length;
       const low = items.filter(x => x.level === '低').length;
+      const threadEntries = activeTab === 'memory' ? items.filter(x => x.category === '线程入口').length : 0;
       const errors = collectionErrors.slice(0, 4).map(x => `<span class="bad-text" title="${escapeCell(x)}">${escapeCell(x)}</span>`).join('');
       summaryEl.innerHTML = [
         `<span class="badge info">总数 ${items.length}</span>`,
         `<span class="badge bad">高 ${high}</span>`,
         `<span class="badge warn">中 ${medium}</span>`,
         `<span class="badge info">低 ${low}</span>`,
+        activeTab === 'memory' ? (includeThreads.checked
+          ? `<span class="badge info" title="已执行线程起始地址核查，只显示异常入口">线程入口 已检查 · 异常 ${threadEntries}</span>`
+          : '<span class="badge ok" title="本次未枚举线程起始地址">线程入口 未检查</span>') : '',
         generatedAt ? `<span class="badge ok">${escapeCell(generatedAt)}</span>` : '',
         sourceSummary ? `<span class="badge info" title="${escapeCell(sourceSummary)}">${escapeCell(sourceSummary)}</span>` : '',
         errors
@@ -505,11 +564,11 @@
         table.innerHTML = '<div class="empty">没有匹配的内存异常结果</div>';
         return;
       }
-      table.innerHTML = `<table>
+      table.innerHTML = `<table class="memory-table">
         <thead><tr>
-          <th class="level">级别</th><th class="category">分类</th><th class="pid">PID</th><th class="process">进程</th>
-          <th class="reason">原因</th><th class="address">基址/入口</th><th class="size">大小</th><th class="protect">保护属性</th>
-          <th class="category">内存类型</th><th class="pid">线程</th><th class="context">上下文</th><th class="path">路径</th><th class="details">详情</th>
+		  ${memoryHeader('级别','level','level')}${memoryHeader('分类','category','category')}${memoryHeader('PID','pid','pid')}${memoryHeader('进程','process','process')}
+		  ${memoryHeader('原因','reason','reason')}${memoryHeader('大小','size','size')}${memoryHeader('内存类型','memoryType','category')}
+		  ${memoryHeader('熵','entropy','size')}<th class="reason">硬信号</th><th class="context">上下文</th><th class="path">进程路径</th><th class="preview">字符串预览</th><th class="action">操作</th>
         </tr></thead>
         <tbody>${items.map(item => `<tr class="${rowClass(item)}">
           <td class="level">${levelBadge(item.level)}</td>
@@ -517,17 +576,30 @@
           <td class="pid">${escapeCell(item.pid)}</td>
           <td class="process" title="${escapeCell(item.process)}">${escapeCell(item.process)}</td>
           <td class="reason" title="${escapeCell(item.reason)}">${escapeCell(item.reason)}</td>
-          <td class="address" title="${escapeCell(item.base)}">${escapeCell(item.base)}</td>
           <td class="size" title="${escapeCell(item.size)}">${escapeCell(formatSize(item.size))}</td>
-          <td class="protect" title="${escapeCell(item.protect)}">${escapeCell(item.protect)}</td>
           <td class="category" title="${escapeCell(item.memoryType)}">${escapeCell(item.memoryType)}</td>
-          <td class="pid">${escapeCell(item.threadId || '')}</td>
+		  <td class="size" title="${escapeCell(item.entropy)}">${escapeCell(Number(item.entropy || 0).toFixed(2))}</td>
+		  <td class="reason" title="${escapeCell((item.hardSignals || []).join('；'))}">${escapeCell((item.hardSignals || []).join('；'))}</td>
           <td class="context" title="${escapeCell(item.context)}">${escapeCell(item.context)}</td>
           <td class="path" title="${escapeCell(item.path)}">${escapeCell(item.path)}</td>
-          <td class="details" title="${escapeCell(item.details)}">${escapeCell(item.details)}</td>
+		  <td class="preview" title="${escapeCell(item.stringsPreview)}">${escapeCell(item.stringsPreview)}</td>
+		  <td class="action"><button class="secondary memory-detail" data-index="${memoryRecords.indexOf(item)}">详情</button> <button class="secondary memory-export" data-pid="${escapeCell(item.pid)}" data-base="${escapeCell(item.regionBase)}" data-size="${escapeCell(item.size)}" ${item.exportable?'':'disabled'}>导出</button></td>
         </tr>`).join('')}</tbody>
       </table>`;
     }
+
+	function showMemoryDetail(item) {
+	  document.getElementById('memory-detail-title').textContent = `${item.process || '进程'} | PID ${item.pid || '-'} | ${item.regionBase || item.base || '-'}`;
+	  const rows = [
+		['风险/原因', `${item.level || '-'} | ${item.reason || '-'}`], ['进程路径', item.path], ['区域基址', item.regionBase], ['入口/地址', item.base],
+		['区域大小', `${formatSize(item.size)} (${item.size || 0} bytes)`], ['内存类型', item.memoryType], ['当前保护', item.protect], ['初始保护', item.allocationProtect],
+		['后备文件', item.backingFile || '未解析到'], ['异常线程', item.threadId || '-'], ['SHA-256', item.sha256], ['哈希范围', item.hashScope],
+		['熵', Number(item.entropy || 0).toFixed(2)], ['MZ / PE', `${item.hasMZ ? 'MZ' : '-'} / ${item.hasPE ? '有效 PE' : '-'}`],
+		['硬信号', (item.hardSignals || []).join('；')], ['可信上下文', item.context], ['补充详情', item.details]
+	  ];
+	  memoryDialogBody.innerHTML = `<dl class="dialog-grid">${rows.map(([k,v])=>`<dt>${escapeCell(k)}</dt><dd>${escapeCell(v || '-')}</dd>`).join('')}</dl><div class="dialog-code"><strong>十六进制预览</strong>\n${escapeCell(item.hexPreview || '-')}\n\n<strong>可打印字符串预览</strong>\n${escapeCell(item.stringsPreview || '-')}</div>`;
+	  if (typeof memoryDialog.showModal === 'function') memoryDialog.showModal(); else memoryDialog.setAttribute('open','');
+	}
 
     function renderDrivers() {
       const items = visibleItems();
@@ -668,6 +740,27 @@
     });
 
     table.addEventListener('click', event => {
+	  const detailButton = event.target.closest('.memory-detail');
+	  if (detailButton && activeTab === 'memory') {
+		const item = memoryRecords[Number(detailButton.dataset.index)];
+		if (item) showMemoryDetail(item);
+		return;
+	  }
+	  const exportButton = event.target.closest('.memory-export');
+	  if (exportButton && activeTab === 'memory') {
+		exportButton.disabled = true;
+		statusEl.textContent = '正在导出选中异常区域...';
+		const params = new URLSearchParams({pid:exportButton.dataset.pid,base:exportButton.dataset.base,size:exportButton.dataset.size});
+		window.wtlDownload(`/api/threat/memory/export?${params}`).then(()=>statusEl.textContent='异常内存区域证据已导出').catch(err=>statusEl.textContent=`导出失败：${err.message||err}`).finally(()=>exportButton.disabled=false);
+		return;
+	  }
+	  const memoryHeaderEl = event.target.closest('th[data-memory-sort]');
+	  if (memoryHeaderEl && activeTab === 'memory') {
+		const key=memoryHeaderEl.dataset.memorySort;
+		if(memorySort.key===key)memorySort.direction=memorySort.direction==='asc'?'desc':'asc';else memorySort={key,direction:['level','pid','size','entropy'].includes(key)?'desc':'asc'};
+		render();
+		return;
+	  }
       const header = event.target.closest('th[data-sort]');
       if (!header || activeTab !== 'drivers') return;
       const key = header.dataset.sort;
@@ -675,6 +768,7 @@
       else driverSort = { key, direction: ['score', 'sizeKb', 'level'].includes(key) ? 'desc' : 'asc' };
       render();
     });
+	document.getElementById('memory-detail-close').addEventListener('click',()=>memoryDialog.close());
 
     document.querySelectorAll('button.tab').forEach(btn => {
       btn.addEventListener('click', () => {

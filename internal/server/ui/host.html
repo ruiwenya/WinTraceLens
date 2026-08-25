@@ -156,6 +156,9 @@
       color: #26384f;
       font-weight: 650;
     }
+	th.sortable { cursor:pointer; user-select:none; }
+	th.sortable:hover { background:#dfeaf4; }
+	.sort-mark { color:var(--accent); }
     tbody tr:hover td { background: #f3f8ff; }
     .name { width: 190px; }
     .short { width: 120px; }
@@ -185,6 +188,68 @@
     .pill.bad { border-color: #edb4bd; background: #fff0f2; color: var(--bad); }
     .empty { padding: 18px; color: var(--muted); }
     .bad { color: var(--bad); }
+	.risk { width:90px; }
+	.score { width:70px; }
+	.source-status { width:150px; }
+	.reason { width:360px; }
+	.action { width:90px; }
+	.wmi-identity { width:280px; }
+	.wmi-consumer-type { width:180px; }
+	.wmi-action-summary { width:260px; }
+	.wmi-summary { width:300px; }
+	.wmi-risk { width:82px; }
+	.wmi-status { width:110px; }
+	.wmi-object-name { display:block; overflow:hidden; text-overflow:ellipsis; font-weight:650; color:#243b55; }
+	.wmi-object-link { display:block; margin-top:3px; overflow:hidden; text-overflow:ellipsis; color:var(--muted); font-size:12px; }
+	.wmi-table { width:100%; min-width:0; table-layout:fixed; }
+	.wmi-table .wmi-risk { width:6%; }
+	.wmi-table .wmi-status { width:9%; }
+	.wmi-table .wmi-identity { width:23%; }
+	.wmi-table .wmi-consumer-type { width:15%; }
+	.wmi-table .wmi-action-summary { width:21%; }
+	.wmi-table .wmi-summary { width:21%; }
+	.wmi-table .action { width:5%; }
+	.summary-table { width:100%; min-width:0; table-layout:fixed; }
+	.summary-primary { display:block; overflow:hidden; text-overflow:ellipsis; font-weight:650; color:#243b55; }
+	.summary-secondary { display:block; margin-top:3px; overflow:hidden; text-overflow:ellipsis; color:var(--muted); font-size:12px; }
+	.service-summary .risk { width:7%; }
+	.service-summary .signature { width:10%; }
+	.service-summary .source-status { width:13%; }
+	.service-summary .identity { width:19%; }
+	.service-summary .state { width:7%; }
+	.service-summary .start-mode { width:8%; }
+	.service-summary .path-summary { width:15%; }
+	.service-summary .command-summary { width:16%; }
+	.task-summary .signature { width:11%; }
+	.task-summary .identity { width:24%; }
+	.task-summary .state { width:10%; }
+	.task-summary .run-state { width:10%; }
+	.task-summary .path-summary { width:18%; }
+	.task-summary .command-summary { width:22%; }
+	.startup-summary .signature { width:11%; }
+	.startup-summary .source { width:11%; }
+	.startup-summary .identity { width:18%; }
+	.startup-summary .path-summary { width:23%; }
+	.startup-summary .command-summary { width:32%; }
+	.summary-table .detail-action { width:5%; text-align:center; }
+	.summary-table .detail-action button { width:100%; min-width:0; padding:0 6px; }
+	tbody tr.high td { background:#fff0f2; }
+	tbody tr.medium td { background:#fff9ed; }
+	.service-scope { display:inline-flex; align-items:center; gap:6px; margin-left:8px; }
+	.service-scope[hidden] { display:none; }
+	.service-scope button { height:30px; }
+	.service-scope button.active { border-color:var(--accent); background:#e8f2fb; color:var(--accent-dark); }
+	dialog { width:min(980px,calc(100vw - 40px)); max-height:calc(100vh - 60px); padding:0; border:1px solid var(--line); border-radius:6px; box-shadow:0 16px 48px rgba(20,38,62,.28); }
+	dialog::backdrop { background:rgba(16,28,42,.42); }
+	.dialog-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 14px; border-bottom:1px solid var(--line); background:var(--head-2); }
+	.dialog-head h2 { margin:0; font-size:16px; }
+	.dialog-body { max-height:calc(100vh - 150px); overflow:auto; padding:14px; }
+	.dialog-grid { display:grid; grid-template-columns:170px minmax(0,1fr); gap:1px; border:1px solid var(--line); background:var(--line); }
+	.dialog-grid dt,.dialog-grid dd { margin:0; padding:8px 10px; background:#fff; overflow-wrap:anywhere; }
+	.dialog-grid dd { white-space:pre-wrap; }
+	.dialog-grid dt { color:var(--muted); font-weight:600; }
+	.dialog-section + .dialog-section { margin-top:14px; }
+	.dialog-section h3 { margin:0 0 7px; color:#26384f; font-size:14px; }
   </style>
   <link rel="stylesheet" href="/nav.css">
   <script src="/app.js"></script>
@@ -218,11 +283,11 @@
       <input id="filter" placeholder="按名称、路径、命令、MD5、账户过滤；支持 /正则/i">
       <span id="status" class="status">尚未加载</span>
     </div>
-    <div class="system-toolbar" aria-label="系统界面对比">
-      <span class="tool-label">系统界面对比</span>
+    <div class="system-toolbar" aria-label="系统界面跳转">
+      <span class="tool-label">系统界面跳转</span>
       <button class="secondary system-tool" data-tool="services">服务管理器</button>
       <button class="secondary system-tool" data-tool="tasks">任务计划程序</button>
-      <button class="secondary system-tool" data-tool="startup">系统配置启动项</button>
+      <button class="secondary system-tool" data-tool="startup">任务管理器启动项</button>
       <button class="secondary system-tool" data-tool="users">本地用户和组</button>
       <button class="secondary system-tool" data-tool="registry">注册表</button>
       <span id="system-tool-status" class="tool-hint">用于和采集结果快速对比</span>
@@ -233,6 +298,8 @@
       <button class="tab" data-tab="startup">启动项</button>
       <button class="tab" data-tab="users">用户</button>
       <button class="tab" data-tab="ifeo">镜像劫持</button>
+	  <button class="tab" data-tab="wmi">WMI 持久化</button>
+	  <span id="service-scope" class="service-scope"><button class="secondary active" data-service-scope="risk">风险/差异</button><button class="secondary" data-service-scope="all">全部服务</button></span>
     </div>
     <section class="panel">
       <div id="table" class="table-wrap">
@@ -240,6 +307,10 @@
       </div>
     </section>
   </main>
+
+  <dialog id="service-detail-dialog"><div class="dialog-head"><h2 id="service-detail-title">服务详情</h2><button id="service-detail-close" class="secondary">关闭</button></div><div id="service-detail-body" class="dialog-body"></div></dialog>
+  <dialog id="host-item-detail-dialog"><div class="dialog-head"><h2 id="host-item-detail-title">项目详情</h2><button id="host-item-detail-close" class="secondary">关闭</button></div><div id="host-item-detail-body" class="dialog-body"></div></dialog>
+  <dialog id="wmi-detail-dialog"><div class="dialog-head"><h2 id="wmi-detail-title">WMI 永久事件订阅详情</h2><button id="wmi-detail-close" class="secondary">关闭</button></div><div id="wmi-detail-body" class="dialog-body"></div></dialog>
 
   <script>
     const table = document.getElementById('table');
@@ -249,6 +320,18 @@
     const systemToolStatus = document.getElementById('system-tool-status');
     let snapshot = null;
     let activeTab = 'services';
+	let serviceScope = 'risk';
+	let serviceSort = { key: 'riskScore', direction: 'desc' };
+	let taskSort = { key: 'signature', direction: 'desc' };
+	let startupSort = { key: 'signature', direction: 'desc' };
+	let wmiSort = { key: 'riskScore', direction: 'desc' };
+	const serviceScopeEl = document.getElementById('service-scope');
+	const serviceDialog = document.getElementById('service-detail-dialog');
+	const serviceDialogBody = document.getElementById('service-detail-body');
+	const hostItemDialog = document.getElementById('host-item-detail-dialog');
+	const hostItemDialogBody = document.getElementById('host-item-detail-body');
+	const wmiDialog = document.getElementById('wmi-detail-dialog');
+	const wmiDialogBody = document.getElementById('wmi-detail-body');
 
     function text(value) {
       return value == null ? '' : String(value);
@@ -287,66 +370,87 @@
       document.querySelectorAll('button.tab').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.tab === activeTab);
       });
+	  serviceScopeEl.hidden = activeTab !== 'services';
 
       if (activeTab === 'services') return renderServices();
       if (activeTab === 'tasks') return renderTasks();
       if (activeTab === 'startup') return renderStartup();
       if (activeTab === 'users') return renderUsers();
       if (activeTab === 'ifeo') return renderIFEO();
+	  if (activeTab === 'wmi') return renderWMI();
     }
 
     function renderServices() {
-      const items = visible(snapshot.services || []);
+	  const all = visible(snapshot.services || []);
+	  const scoped = serviceScope === 'risk' ? all.filter(x => x.riskLevel || x.sourceStatus !== '三源一致') : all;
+	  const direction = serviceSort.direction === 'asc' ? 1 : -1;
+	  const items = [...scoped].sort((a,b)=>{const av=serviceSortValue(a,serviceSort.key),bv=serviceSortValue(b,serviceSort.key);if(av<bv)return -1*direction;if(av>bv)return 1*direction;return text(a.name).localeCompare(text(b.name),'zh-CN')});
       statusEl.textContent = `服务 ${items.length} / ${(snapshot.services || []).length}`;
-      table.innerHTML = `<table><thead><tr>
-        <th class="name">服务名</th><th class="name">显示名</th><th class="short">状态</th><th class="short">启动</th>
-        <th class="short">账户</th><th class="md5">MD5</th><th class="signature">签名</th><th class="path">路径</th><th class="command">命令</th>
-      </tr></thead><tbody>${items.map(x => `<tr>
-        <td class="name" title="${escapeCell(x.name)}">${escapeCell(x.name)}</td>
-        <td class="name" title="${escapeCell(x.displayName)}">${escapeCell(x.displayName)}</td>
-        <td class="short">${escapeCell(x.state)}</td><td class="short">${escapeCell(x.startMode)}</td>
-        <td class="short" title="${escapeCell(x.account)}">${escapeCell(x.account)}</td>
-        <td class="md5" title="${escapeCell(x.md5 || x.hashError)}">${escapeCell(x.md5 || x.hashError)}</td>
-        <td class="signature">${renderSignature(x.signature, x.signatureMsg)}</td>
-        <td class="path" title="${escapeCell(x.path)}">${escapeCell(x.path)}</td>
-        <td class="command" title="${escapeCell(x.command)}">${escapeCell(x.command)}</td>
-      </tr>`).join('')}</tbody></table>`;
+	  if (!items.length) { table.innerHTML='<div class="empty">当前筛选下没有风险服务或多源差异；可切换“全部服务”查看完整列表。</div>'; return; }
+      table.innerHTML = `<table class="summary-table service-summary"><thead><tr>
+		${serviceHeader('风险','riskScore','risk')}${serviceHeader('签名','signatureSummary','signature')}${serviceHeader('来源状态','sourceStatus','source-status')}${serviceHeader('服务','name','identity')}${serviceHeader('状态','state','state')}${serviceHeader('启动类型','startMode','start-mode')}${serviceHeader('路径','path','path-summary')}${serviceHeader('命令','command','command-summary')}<th class="detail-action">详情</th>
+      </tr></thead><tbody>${items.map(x => `<tr class="${x.riskLevel==='高'?'high':x.riskLevel==='中'?'medium':''}">
+		<td class="risk" title="评分 ${escapeCell(x.riskScore||0)}；${escapeCell((x.riskReasons||[]).join('；'))}">${serviceRiskBadge(x.riskLevel)}</td>
+		<td class="signature" title="${escapeCell(serviceSignatureTitle(x))}">${renderSignature(serviceSignatureSummary(x),serviceSignatureTitle(x))}</td>
+		<td class="source-status" title="${escapeCell(x.sourceStatus)}">${escapeCell(x.sourceStatus||'-')}</td>
+		<td class="identity" title="${escapeCell(`${x.name||''} ${x.displayName||''}`)}"><span class="summary-primary">${escapeCell(x.name||'-')}</span><span class="summary-secondary">${escapeCell(x.displayName||'-')}</span></td>
+		<td class="state">${escapeCell(x.state||'-')}</td><td class="start-mode">${escapeCell(x.startMode||'-')}</td>
+		<td class="path-summary" title="${escapeCell(x.path||x.fileStatus)}">${escapeCell(x.path||x.fileStatus||'-')}</td>
+		<td class="command-summary" title="${escapeCell(x.command)}">${escapeCell(x.command||'-')}</td>
+		<td class="detail-action"><button class="secondary service-detail" data-service-index="${items.indexOf(x)}">查看</button></td>
+	  </tr>`).join('')}</tbody></table>`;
+	  table._visibleServices = items;
     }
 
+	function signatureRank(value){return({'签名异常':5,'无签名请注意!!!':4,'无签名':4,'未知':3,'已签名':2,'系统文件':1}[text(value)]||0)}
+	function serviceSignatureSummary(item){const values=[item.signature,item.serviceDllSignature].filter(Boolean);return values.sort((a,b)=>signatureRank(b)-signatureRank(a))[0]||''}
+	function serviceSignatureTitle(item){return `主文件：${item.signature||'-'} ${item.signatureMsg||''}；ServiceDLL：${item.serviceDllSignature||'-'} ${item.serviceDllSignatureMsg||''}`}
+	function serviceSortValue(item,key){if(key==='riskScore')return Number(item.riskScore||0);if(key==='riskLevel')return({'高':3,'中':2,'低':1}[item.riskLevel]||0);if(key==='signatureSummary')return signatureRank(serviceSignatureSummary(item));return text(item[key]).toLowerCase()}
+	function serviceHeader(label,key,className){const active=serviceSort.key===key,mark=active?(serviceSort.direction==='asc'?' ↑':' ↓'):'';return`<th class="${className} sortable" data-service-sort="${key}" title="单击按${escapeCell(label)}排序">${escapeCell(label)}<span class="sort-mark">${mark}</span></th>`}
+	function serviceRiskBadge(level){if(level==='高')return'<span class="pill bad">高</span>';if(level==='中')return'<span class="pill unsigned">中</span>';if(level==='低')return'<span class="pill signed">低</span>';return'<span class="pill system">正常</span>'}
+	async function loadHostJSON(url){const res=await fetch(url,{cache:'no-store'});if(!res.ok)throw new Error(await res.text()||res.statusText);return res.json()}
+	async function showServiceDetail(item){document.getElementById('service-detail-title').textContent=`${item.name||'服务'} / ${item.displayName||''}`;const baseRows=[['风险',`${item.riskLevel||'未标记'} | 评分 ${item.riskScore||0}`],['风险原因',(item.riskReasons||[]).join('；')],['来源状态',item.sourceStatus],['状态/启动',`${item.state||'-'} / ${item.startMode||'-'}`],['运行账户',item.account],['命令',item.command],['SCM BinaryPath',item.scmPath],['注册表 ImagePath',item.registryImagePath],['WMI PathName',item.wmiPath],['Services 注册表项',item.registryPath],['解析文件',`${item.path||'-'} | ${item.fileStatus||'-'}`],['文件签名',`${item.signature||'-'} | ${item.signatureMsg||''}`],['MD5',item.md5||item.hashError],['ServiceDLL',item.serviceDll],['ServiceDLL 签名',`${item.serviceDllSignature||'-'} | ${item.serviceDllSignatureMsg||''}`]];const render=(scriptValue)=>{const rows=[...baseRows,['关联脚本',scriptValue]];serviceDialogBody.innerHTML=`<dl class="dialog-grid">${rows.map(([k,v])=>`<dt>${escapeCell(k)}</dt><dd>${escapeCell(v||'-')}</dd>`).join('')}</dl>`};render('正在按需扫描近期脚本...');if(typeof serviceDialog.showModal==='function')serviceDialog.showModal();else serviceDialog.setAttribute('open','');try{const data=await loadHostJSON(`/api/host/service-scripts?name=${encodeURIComponent(item.name)}`);const scripts=(data.items||[]).map(x=>`${x.path} | ${x.reason}`).join('；');const warnings=(data.collectionErrors||[]).join('；');render(scripts||warnings||'未发现通过 sc create/start/config 关联该服务的近期脚本')}catch(err){render(`关联脚本采集失败：${err.message}`)}}
+
     function renderTasks() {
-      const items = visible(snapshot.scheduledTasks || []);
+	  const direction = taskSort.direction === 'asc' ? 1 : -1;
+	  const items = [...visible(snapshot.scheduledTasks || [])].sort((a,b)=>compareHostItems(a,b,taskSort,direction,'name'));
       statusEl.textContent = `计划任务 ${items.length} / ${(snapshot.scheduledTasks || []).length}`;
-      table.innerHTML = `<table><thead><tr>
-        <th class="name">任务名</th><th class="path">任务路径</th><th class="short">状态</th><th class="short">运行状态</th><th class="short">作者</th>
-        <th class="md5">MD5</th><th class="signature">签名</th><th class="path">可执行路径</th><th class="command">命令/参数</th>
+      table.innerHTML = `<table class="summary-table task-summary"><thead><tr>
+		${hostHeader('计划任务','签名','signature','signature')}${hostHeader('计划任务','任务','name','identity')}${hostHeader('计划任务','启用状态','state','state')}${hostHeader('计划任务','运行状态','status','run-state')}${hostHeader('计划任务','可执行路径','executable','path-summary')}${hostHeader('计划任务','命令/参数','command','command-summary')}<th class="detail-action">详情</th>
       </tr></thead><tbody>${items.map(x => `<tr>
-        <td class="name" title="${escapeCell(x.name)}">${escapeCell(x.name)}</td>
-        <td class="path" title="${escapeCell(x.path)}">${escapeCell(x.path)}</td>
-        <td class="short" title="${escapeCell(x.state)}">${escapeCell(x.state)}</td>
-        <td class="short" title="${escapeCell(x.status)}">${escapeCell(x.status)}</td>
-        <td class="short" title="${escapeCell(x.author)}">${escapeCell(x.author)}</td>
-        <td class="md5" title="${escapeCell(x.md5 || x.hashError)}">${escapeCell(x.md5 || x.hashError)}</td>
-        <td class="signature">${renderSignature(x.signature, x.signatureMsg)}</td>
-        <td class="path" title="${escapeCell(x.executable)}">${escapeCell(x.executable)}</td>
-        <td class="command" title="${escapeCell(x.command + ' ' + x.arguments)}">${escapeCell(x.command + ' ' + x.arguments)}</td>
+		<td class="signature">${renderSignature(x.signature,x.signatureMsg)}</td>
+		<td class="identity" title="${escapeCell(`${x.name||''} ${x.path||''}`)}"><span class="summary-primary">${escapeCell(x.name||'-')}</span><span class="summary-secondary">${escapeCell(x.path||'-')}</span></td>
+		<td class="state">${escapeCell(x.state||'-')}</td><td class="run-state">${escapeCell(x.status||'-')}</td>
+		<td class="path-summary" title="${escapeCell(x.executable)}">${escapeCell(x.executable||'-')}</td>
+		<td class="command-summary" title="${escapeCell(taskCommand(x))}">${escapeCell(taskCommand(x)||'-')}</td>
+		<td class="detail-action"><button class="secondary task-detail" data-task-index="${items.indexOf(x)}">查看</button></td>
       </tr>`).join('')}</tbody></table>`;
+	  table._visibleTasks = items;
     }
 
     function renderStartup() {
-      const items = visible(snapshot.startupItems || []);
+	  const direction = startupSort.direction === 'asc' ? 1 : -1;
+	  const items = [...visible(snapshot.startupItems || [])].sort((a,b)=>compareHostItems(a,b,startupSort,direction,'name'));
       statusEl.textContent = `启动项 ${items.length} / ${(snapshot.startupItems || []).length}`;
-      table.innerHTML = `<table><thead><tr>
-        <th class="short">来源</th><th class="name">名称</th><th class="md5">MD5</th><th class="signature">签名</th>
-        <th class="path">路径</th><th class="command">命令</th><th class="path">位置</th>
+      table.innerHTML = `<table class="summary-table startup-summary"><thead><tr>
+		${hostHeader('启动项','签名','signature','signature')}${hostHeader('启动项','来源','source','source')}${hostHeader('启动项','名称','name','identity')}${hostHeader('启动项','路径','path','path-summary')}${hostHeader('启动项','命令','command','command-summary')}<th class="detail-action">详情</th>
       </tr></thead><tbody>${items.map(x => `<tr>
-        <td class="short">${escapeCell(x.source)}</td><td class="name" title="${escapeCell(x.name)}">${escapeCell(x.name)}</td>
-        <td class="md5" title="${escapeCell(x.md5 || x.hashError)}">${escapeCell(x.md5 || x.hashError)}</td>
-        <td class="signature">${renderSignature(x.signature, x.signatureMsg)}</td>
-        <td class="path" title="${escapeCell(x.path)}">${escapeCell(x.path)}</td>
-        <td class="command" title="${escapeCell(x.command)}">${escapeCell(x.command)}</td>
-        <td class="path" title="${escapeCell(x.location)}">${escapeCell(x.location)}</td>
+		<td class="signature">${renderSignature(x.signature,x.signatureMsg)}</td><td class="source">${escapeCell(x.source||'-')}</td>
+		<td class="identity" title="${escapeCell(x.name)}"><span class="summary-primary">${escapeCell(x.name||'-')}</span><span class="summary-secondary">${escapeCell(x.location||'-')}</span></td>
+		<td class="path-summary" title="${escapeCell(x.path)}">${escapeCell(x.path||'-')}</td>
+		<td class="command-summary" title="${escapeCell(x.command)}">${escapeCell(x.command||'-')}</td>
+		<td class="detail-action"><button class="secondary startup-detail" data-startup-index="${items.indexOf(x)}">查看</button></td>
       </tr>`).join('')}</tbody></table>`;
+	  table._visibleStartup = items;
     }
+
+	function hostSortValue(item,key){if(key==='signature')return signatureRank(item.signature);return text(item[key]).toLowerCase()}
+	function compareHostItems(a,b,sort,direction,fallback){const av=hostSortValue(a,sort.key),bv=hostSortValue(b,sort.key);if(av<bv)return -1*direction;if(av>bv)return 1*direction;return text(a[fallback]).localeCompare(text(b[fallback]),'zh-CN')}
+	function hostHeader(scope,label,key,className){const sort=scope==='计划任务'?taskSort:startupSort;const active=sort.key===key,mark=active?(sort.direction==='asc'?' ↑':' ↓'):'';return`<th class="${className} sortable" data-host-sort-scope="${scope}" data-host-sort="${key}" title="单击按${escapeCell(label)}排序">${escapeCell(label)}<span class="sort-mark">${mark}</span></th>`}
+	function taskCommand(item){return [item.command,item.arguments].filter(Boolean).join(' ')}
+	function showHostItemDetail(title,sections){document.getElementById('host-item-detail-title').textContent=title;hostItemDialogBody.innerHTML=sections.map(section=>wmiDetailSection(section.title,section.rows)).join('');if(typeof hostItemDialog.showModal==='function')hostItemDialog.showModal();else hostItemDialog.setAttribute('open','')}
+	function showTaskDetail(item){showHostItemDetail(`${item.name||'计划任务'} / 计划任务详情`,[{title:'状态与身份',rows:[['任务名',item.name],['任务路径',item.path],['启用状态',item.state],['运行状态',item.status],['作者',item.author]]},{title:'执行与文件',rows:[['命令',item.command],['参数',item.arguments],['完整命令',taskCommand(item)],['可执行路径',item.executable],['文件签名',`${item.signature||'-'} | ${item.signatureMsg||''}`],['MD5',item.md5||item.hashError]]}])}
+	function showStartupDetail(item){showHostItemDetail(`${item.name||'启动项'} / 启动项详情`,[{title:'启动项位置',rows:[['名称',item.name],['来源',item.source],['位置',item.location]]},{title:'执行与文件',rows:[['命令',item.command],['解析路径',item.path],['文件签名',`${item.signature||'-'} | ${item.signatureMsg||''}`],['MD5',item.md5||item.hashError]]}])}
 
     function renderUsers() {
       const items = visible(snapshot.users || []);
@@ -376,6 +480,60 @@
         <td class="path" title="${escapeCell(x.registryPath)}">${escapeCell(x.registryPath)}</td>
       </tr>`).join('')}</tbody></table>`;
     }
+
+	function renderWMI() {
+	  const all = visible(snapshot.wmiSubscriptions || []);
+	  const direction = wmiSort.direction === 'asc' ? 1 : -1;
+	  const items = [...all].sort((a,b)=>{const av=wmiSortValue(a,wmiSort.key),bv=wmiSortValue(b,wmiSort.key);if(av<bv)return -1*direction;if(av>bv)return 1*direction;return text(a.filterName+a.consumerName).localeCompare(text(b.filterName+b.consumerName),'zh-CN')});
+	  const high = (snapshot.wmiSubscriptions || []).filter(x=>x.riskLevel==='高').length;
+	  const medium = (snapshot.wmiSubscriptions || []).filter(x=>x.riskLevel==='中').length;
+	  const system = (snapshot.wmiSubscriptions || []).filter(x=>x.systemManaged).length;
+	  const warning = (snapshot.collectionErrors || []).find(x=>text(x).includes('WMI 永久事件订阅'));
+	  statusEl.textContent = warning || `WMI 永久事件订阅 ${items.length} / ${(snapshot.wmiSubscriptions || []).length}；高风险 ${high}，中风险 ${medium}，系统内置 ${system}`;
+	  if (!items.length) {
+		table.innerHTML = warning
+		  ? `<div class="empty bad">${escapeCell(warning)}。请以管理员身份运行后重新采集。</div>`
+		  : '<div class="empty">未发现 WMI 永久事件订阅。该视图会完整显示绑定项以及孤立过滤器、孤立消费者。</div>';
+		return;
+	  }
+	  table.innerHTML = `<table class="wmi-table"><thead><tr>
+		${wmiHeader('风险','riskLevel','wmi-risk')}${wmiHeader('状态','status','wmi-status')}
+		${wmiHeader('订阅对象','filterName','wmi-identity')}${wmiHeader('消费者类型','consumerType','wmi-consumer-type')}
+		<th class="wmi-action-summary">执行动作</th><th class="wmi-summary">判定说明</th><th class="action">详情</th>
+	  </tr></thead><tbody>${items.map((x,index)=>`<tr class="${x.riskLevel==='高'?'high':x.riskLevel==='中'?'medium':''}">
+		<td class="wmi-risk" title="评分 ${escapeCell(x.riskScore||0)}">${wmiRiskBadge(x)}</td><td class="wmi-status">${escapeCell(x.status)}</td>
+		<td class="wmi-identity" title="${escapeCell(wmiIdentity(x))}"><span class="wmi-object-name">${escapeCell(x.filterName||'未命名过滤器')}</span><span class="wmi-object-link">→ ${escapeCell(x.consumerName||'未命名消费者')}</span></td>
+		<td class="wmi-consumer-type" title="${escapeCell(x.consumerType)}">${escapeCell(x.consumerType||'-')}</td>
+		<td class="wmi-action-summary" title="${escapeCell(wmiActionSummary(x))}">${escapeCell(wmiActionSummary(x))}</td>
+		<td class="wmi-summary" title="${escapeCell(x.summary||(x.riskReasons||[]).join('；'))}">${escapeCell(x.summary||(x.riskReasons||[]).join('；')||'未发现明显异常')}</td>
+		<td class="action"><button class="secondary wmi-detail" data-wmi-index="${index}">查看</button></td>
+	  </tr>`).join('')}</tbody></table>`;
+	  table._visibleWMI = items;
+	}
+
+	function wmiSortValue(item,key){if(key==='riskScore')return Number(item.riskScore||0);if(key==='riskLevel')return({'高':3,'中':2,'低':1}[item.riskLevel]||0);return text(item[key]).toLowerCase()}
+	function wmiHeader(label,key,className){const active=wmiSort.key===key,mark=active?(wmiSort.direction==='asc'?' ↑':' ↓'):'';return`<th class="${className} sortable" data-wmi-sort="${key}" title="单击按${escapeCell(label)}排序">${escapeCell(label)}<span class="sort-mark">${mark}</span></th>`}
+	function wmiRiskBadge(item){return item.systemManaged?'<span class="pill system">系统</span>':serviceRiskBadge(item.riskLevel)}
+	function wmiIdentity(item){return `${item.filterName||'未命名过滤器'} -> ${item.consumerName||'未命名消费者'}`}
+	function wmiActionSummary(item){
+	  if(item.systemManaged)return '系统事件日志记录（不执行外部命令）';
+	  if(item.commandLine)return item.commandLine;
+	  if(item.executablePath)return item.executablePath;
+	  if(item.scriptText)return `脚本消费者（${item.scriptText.length} 字符，详情查看）`;
+	  if(item.consumerDetails)return item.consumerDetails;
+	  return '未声明命令或脚本';
+	}
+	function wmiDetailSection(title,rows){return `<section class="dialog-section"><h3>${escapeCell(title)}</h3><dl class="dialog-grid">${rows.map(([k,v])=>`<dt>${escapeCell(k)}</dt><dd>${escapeCell(v===false?'否':v===true?'是':v||'-')}</dd>`).join('')}</dl></section>`}
+	function showWMIDetail(item) {
+	  document.getElementById('wmi-detail-title').textContent = `${item.filterName||'未命名过滤器'} -> ${item.consumerName||'未命名消费者'}`;
+	  wmiDialogBody.innerHTML = [
+		wmiDetailSection('判定摘要', [['分类',item.systemManaged?'Windows 系统内置':'普通或待核查订阅'],['风险',`${item.riskLevel||'信息'} | 评分 ${item.riskScore||0}`],['判定说明',item.summary],['风险原因',(item.riskReasons||[]).join('；')],['对象状态',item.status],['命名空间',item.namespace]]),
+		wmiDetailSection('触发过滤器', [['过滤器',item.filterName],['过滤器路径',item.filterPath],['查询语言',item.queryLanguage],['事件命名空间',item.eventNamespace],['WQL 查询',item.query],['过滤器 CreatorSID',item.filterCreatorSid]]),
+		wmiDetailSection('事件消费者', [['消费者',item.consumerName],['消费者路径',item.consumerPath],['消费者类型',item.consumerType],['命令行模板',item.commandLine],['可执行路径',item.executablePath],['文件签名',`${item.executableSignature||'-'} | ${item.executableSignatureMsg||''}`],['MD5',item.executableMd5||item.executableHashError],['脚本内容',item.scriptText],['消费者详情',item.consumerDetails],['交互运行',item.runInteractively],['消费者 CreatorSID',item.consumerCreatorSid]]),
+		wmiDetailSection('绑定与关联', [['绑定 CreatorSID',item.bindingCreatorSid],['绑定路径',item.bindingPath],['关联服务',(item.relatedServices||[]).join('；')],['关联任务',(item.relatedTasks||[]).join('；')]])
+	  ].join('');
+	  if(typeof wmiDialog.showModal==='function')wmiDialog.showModal();else wmiDialog.setAttribute('open','');
+	}
 
     function downloadCSV(url) {
       window.wtlDownload(url).catch(err => {
@@ -427,6 +585,26 @@
       downloadCSV(`/api/host.csv?${hostCSVQueryString()}`);
     });
     filter.addEventListener('input', render);
+	document.querySelectorAll('[data-service-scope]').forEach(btn=>btn.addEventListener('click',()=>{serviceScope=btn.dataset.serviceScope;document.querySelectorAll('[data-service-scope]').forEach(x=>x.classList.toggle('active',x===btn));render()}));
+	table.addEventListener('click',event=>{
+	  const serviceHeader=event.target.closest('[data-service-sort]');
+	  if(serviceHeader&&activeTab==='services'){const key=serviceHeader.dataset.serviceSort;if(serviceSort.key===key)serviceSort.direction=serviceSort.direction==='asc'?'desc':'asc';else serviceSort={key,direction:['riskScore','riskLevel'].includes(key)?'desc':'asc'};render();return}
+	  const hostHeader=event.target.closest('[data-host-sort]');
+	  if(hostHeader){const scope=hostHeader.dataset.hostSortScope,key=hostHeader.dataset.hostSort;const sort=scope==='计划任务'?taskSort:startupSort;const next=sort.key===key?{key,direction:sort.direction==='asc'?'desc':'asc'}:{key,direction:key==='signature'?'desc':'asc'};if(scope==='计划任务')taskSort=next;else startupSort=next;render();return}
+	  const wmiHeader=event.target.closest('[data-wmi-sort]');
+	  if(wmiHeader&&activeTab==='wmi'){const key=wmiHeader.dataset.wmiSort;if(wmiSort.key===key)wmiSort.direction=wmiSort.direction==='asc'?'desc':'asc';else wmiSort={key,direction:['riskScore','riskLevel'].includes(key)?'desc':'asc'};render();return}
+	  const serviceButton=event.target.closest('.service-detail');
+	  if(serviceButton&&table._visibleServices){const item=table._visibleServices[Number(serviceButton.dataset.serviceIndex)];if(item)showServiceDetail(item);return}
+	  const taskButton=event.target.closest('.task-detail');
+	  if(taskButton&&table._visibleTasks){const item=table._visibleTasks[Number(taskButton.dataset.taskIndex)];if(item)showTaskDetail(item);return}
+	  const startupButton=event.target.closest('.startup-detail');
+	  if(startupButton&&table._visibleStartup){const item=table._visibleStartup[Number(startupButton.dataset.startupIndex)];if(item)showStartupDetail(item);return}
+	  const wmiButton=event.target.closest('.wmi-detail');
+	  if(wmiButton&&table._visibleWMI){const item=table._visibleWMI[Number(wmiButton.dataset.wmiIndex)];if(item)showWMIDetail(item)}
+	});
+	document.getElementById('service-detail-close').addEventListener('click',()=>serviceDialog.close());
+	document.getElementById('host-item-detail-close').addEventListener('click',()=>hostItemDialog.close());
+	document.getElementById('wmi-detail-close').addEventListener('click',()=>wmiDialog.close());
     document.querySelectorAll('button.tab').forEach(btn => {
       btn.addEventListener('click', () => {
         activeTab = btn.dataset.tab;

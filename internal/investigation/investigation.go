@@ -14,6 +14,7 @@ import (
 	"github.com/ruiwenya/WinTraceLens/internal/history"
 	"github.com/ruiwenya/WinTraceLens/internal/host"
 	"github.com/ruiwenya/WinTraceLens/internal/process"
+	"github.com/ruiwenya/WinTraceLens/internal/registryanomaly"
 	"github.com/ruiwenya/WinTraceLens/internal/securitylog"
 )
 
@@ -50,6 +51,8 @@ type Sources struct {
 	DriverError     error
 	Connections     []process.ConnectionInfo
 	ConnectionError error
+	Registry        registryanomaly.Snapshot
+	RegistryError   error
 }
 
 type Coverage struct {
@@ -112,6 +115,7 @@ func Collect(opts Options) Snapshot {
 	sources.Security.Events = securitylog.FilterPowerShellNoise(sources.Security.Events)
 	sources.Drivers, sources.DriverError = driveranalysis.Collect(driveranalysis.Options{HashLimitBytes: opts.HashLimitBytes, MaxRecords: min(sourceLimit, 300)})
 	sources.Connections, sources.ConnectionError = process.CollectConnections()
+	sources.Registry, sources.RegistryError = registryanomaly.Collect(registryanomaly.Options{MaxRecords: min(sourceLimit, 1000), MaxKeys: 6000, MaxValues: 30000, MaxDepth: 5, MaxDataSize: 4 * 1024 * 1024, Timeout: 10 * time.Second})
 	return Build(opts, sources)
 }
 
@@ -132,6 +136,11 @@ func Build(opts Options, sources Sources) Snapshot {
 	driverErr := sources.DriverError
 	connections := sources.Connections
 	connectionErr := sources.ConnectionError
+	registrySnapshot := sources.Registry
+	registryErr := sources.RegistryError
+	if registryErr == nil && processErr == nil && hostErr == nil {
+		registrySnapshot = registryanomaly.Correlate(registrySnapshot, processes, hostSnapshot)
+	}
 
 	if processErr != nil {
 		snapshot.addFailure("进程信息", processErr)
@@ -144,17 +153,18 @@ func Build(opts Options, sources Sources) Snapshot {
 	snapshot.addCoverage("事件日志", securityErr, len(securitySnapshot.Events), securitySnapshot.CollectionErrors)
 	snapshot.addCoverage("内核驱动风险", driverErr, len(driverSnapshot.Items), driverSnapshot.CollectionErrors)
 	snapshot.addCoverage("实时网络连接", connectionErr, len(connections), nil)
+	snapshot.addCoverage("注册表异常", registryErr, len(registrySnapshot.Records), registrySnapshot.CollectionErrors)
 
 	for _, item := range processes {
 		pid := strconv.FormatUint(uint64(item.PID), 10)
 		snapshot.addEntity(Entity{
 			Kind: "进程", Source: "进程信息", Group: "进程信息", Name: item.Name, Value: item.Name, PID: pid,
-			Hash: item.MD5, Path: item.Path, Details: join("父进程="+item.ParentName+" ("+strconv.FormatUint(uint64(item.ParentPID), 10)+")", item.Signature, item.EnumerationWarning),
+			Hash: item.MD5, Path: item.Path, Details: join("父进程="+item.ParentName+" ("+strconv.FormatUint(uint64(item.ParentPID), 10)+")", "账户="+item.UserName, "完整性="+item.IntegrityLevel, "命令行="+item.CommandLine, item.Signature, item.EnumerationWarning),
 		})
 		snapshot.addTimeline(opts, TimelineEvent{
 			Time: item.CreatedAt, Source: "进程信息", Group: "进程信息", Category: "进程启动", Action: "当前仍在运行",
 			Entity: item.Name, PID: pid, Path: item.Path, Hash: item.MD5,
-			Details: join("父进程="+item.ParentName, item.Signature, "连接数="+strconv.Itoa(item.ConnectionCount)),
+			Details: join("父进程="+item.ParentName, "账户="+item.UserName, "完整性="+item.IntegrityLevel, "命令行="+item.CommandLine, item.Signature, "连接数="+strconv.Itoa(item.ConnectionCount)),
 		})
 	}
 
@@ -174,6 +184,7 @@ func Build(opts Options, sources Sources) Snapshot {
 	appendHostEntities(&snapshot, hostSnapshot)
 	if processErr == nil && hostErr == nil {
 		findings := analysis.BuildFindings(processes, hostSnapshot)
+		findings = append(findings, analysis.RegistryFindings(registrySnapshot)...)
 		snapshot.Coverage = append(snapshot.Coverage, Coverage{Source: "关注项", Status: "完成", Count: len(findings)})
 		for _, item := range findings {
 			snapshot.addEntity(Entity{
@@ -181,6 +192,20 @@ func Build(opts Options, sources Sources) Snapshot {
 				Hash: item.MD5, Path: item.Path, Details: join(item.Reason, item.Command, item.Extra),
 			})
 		}
+	}
+
+	for _, item := range registrySnapshot.Records {
+		path := strings.Trim(strings.TrimSpace(item.Hive+`\`+item.KeyPath), `\`)
+		details := join(strings.Join(item.Reasons, "；"), "值="+item.ValueName, "类型="+item.ValueType, "长度="+strconv.Itoa(item.DataLength), "关联="+strings.Join(item.Associations, "；"))
+		snapshot.addEntity(Entity{
+			Kind: "注册表值", Source: "注册表异常", Group: "注册表异常", Level: item.Level,
+			Name: item.ValueName, Value: item.StringsPreview, User: item.SID, Hash: item.SHA256, Path: path, Details: details,
+		})
+		snapshot.addTimeline(opts, TimelineEvent{
+			Time: item.LastWrite, Source: "注册表异常", Group: "注册表异常", Category: item.ValueType,
+			Level: item.Level, Action: "异常注册表值写入/更新", Entity: item.ValueName, User: item.SID,
+			Path: path, Hash: item.SHA256, Details: details,
+		})
 	}
 
 	for _, item := range fileSnapshot.Records {
@@ -341,6 +366,14 @@ func appendHostEntities(snapshot *Snapshot, data host.Snapshot) {
 	}
 	for _, item := range data.ImageHijacks {
 		snapshot.addEntity(Entity{Kind: "IFEO 劫持", Source: "主机信息", Group: "主机信息", Level: "高", Name: item.Image, Value: item.Debugger, Hash: item.MD5, Path: item.Path, Details: join(item.RegistryPath, item.Signature)})
+	}
+	for _, item := range data.WMISubscriptions {
+		snapshot.addEntity(Entity{
+			Kind: "WMI 永久事件订阅", Source: "主机信息", Group: "主机信息", Level: item.RiskLevel,
+			Name: first(item.FilterName, item.FilterPath, item.Status), Value: first(item.ConsumerName, item.ConsumerPath),
+			Hash: item.ExecutableMD5, Path: item.ExecutablePath,
+			Details: join(item.Status, item.ConsumerType, item.Query, item.CommandLine, item.ScriptText, item.ConsumerDetails, strings.Join(item.RiskReasons, "；")),
+		})
 	}
 }
 
@@ -515,7 +548,7 @@ func fileAction(item filetrace.Record) string {
 }
 
 func hostItemCount(data host.Snapshot) int {
-	return len(data.Services) + len(data.ScheduledTasks) + len(data.StartupItems) + len(data.Users) + len(data.ImageHijacks)
+	return len(data.Services) + len(data.ScheduledTasks) + len(data.StartupItems) + len(data.Users) + len(data.ImageHijacks) + len(data.WMISubscriptions)
 }
 
 func processName(items []process.Info, pid uint32) string {

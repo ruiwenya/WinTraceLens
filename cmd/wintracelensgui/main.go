@@ -7,7 +7,6 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -18,6 +17,7 @@ import (
 
 	webview2 "github.com/jchv/go-webview2"
 
+	"github.com/ruiwenya/WinTraceLens/internal/loopback"
 	"github.com/ruiwenya/WinTraceLens/internal/server"
 )
 
@@ -26,7 +26,7 @@ var version = "2.0.0-preview-gui"
 func main() {
 	runtime.LockOSThread()
 
-	addr := flag.String("addr", "127.0.0.1:0", "internal HTTP listen address")
+	addr := flag.String("addr", loopback.AutomaticAddress, "internal HTTP listen address")
 	hashLimitMB := flag.Int64("hash-limit-mb", 512, "skip MD5 hashing for executable files larger than this size")
 	debug := flag.Bool("debug-webview", false, "enable WebView2 dev tools and context menu")
 	showVersion := flag.Bool("version", false, "print version and exit")
@@ -37,9 +37,13 @@ func main() {
 		return
 	}
 
-	listener, err := net.Listen("tcp", *addr)
+	listener, err := loopback.Listen(*addr)
 	if err != nil {
-		fatalGUI("WinTraceLens 启动失败", "无法启动本地界面服务: "+err.Error())
+		fatalGUI("WinTraceLens 启动失败", fmt.Sprintf(
+			"无法启动本地界面服务（监听地址 %s）。\n\n"+
+				"当前 GUI 默认使用系统分配的随机空闲端口。如果错误信息仍指向 8787，"+
+				"请确认运行的是最新 WinTraceLens.exe，且快捷方式没有附加 -addr 参数。\n\n"+
+				"系统错误: %v", *addr, err))
 	}
 
 	appServer := server.New(server.Options{

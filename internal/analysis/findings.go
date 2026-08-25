@@ -7,6 +7,7 @@ import (
 
 	"github.com/ruiwenya/WinTraceLens/internal/host"
 	"github.com/ruiwenya/WinTraceLens/internal/process"
+	"github.com/ruiwenya/WinTraceLens/internal/registryanomaly"
 	"github.com/ruiwenya/WinTraceLens/internal/selfidentity"
 )
 
@@ -31,6 +32,30 @@ type Finding struct {
 	Path         string `json:"path"`
 	Command      string `json:"command"`
 	Extra        string `json:"extra"`
+}
+
+// RegistryFindings promotes only medium/high registry anomalies into the shared
+// risk list. Low-level records remain available in the dedicated registry view.
+func RegistryFindings(snapshot registryanomaly.Snapshot) []Finding {
+	findings := make([]Finding, 0, len(snapshot.Records))
+	for _, item := range snapshot.Records {
+		if item.Level != levelHigh && item.Level != levelMedium {
+			continue
+		}
+		path := strings.Trim(strings.TrimSpace(item.Hive+`\`+item.KeyPath), `\`)
+		name := path + `\` + item.ValueName
+		findings = append(findings, Finding{
+			Level:   item.Level,
+			Source:  "注册表异常",
+			Name:    name,
+			Reason:  strings.Join(item.Reasons, "；"),
+			Path:    path,
+			Command: item.StringsPreview,
+			Extra: fmt.Sprintf("类型=%s；长度=%d；熵=%.2f；SHA256=%s；关联=%s",
+				item.ValueType, item.DataLength, item.Entropy, item.SHA256, strings.Join(item.Associations, "；")),
+		})
+	}
+	return findings
 }
 
 func BuildFindings(processes []process.Info, snapshot host.Snapshot) []Finding {
@@ -65,6 +90,14 @@ func BuildFindings(processes []process.Info, snapshot host.Snapshot) []Finding {
 	for _, item := range snapshot.Services {
 		extra := fmt.Sprintf("状态: %s, 启动: %s, 账户: %s", item.State, item.StartMode, item.Account)
 		findings = append(findings, executableFindings("服务", displayName(item.Name, item.DisplayName), item.MD5, item.Signature, item.SignatureMsg, item.Path, item.Command, item.HashError, "", extra, 0)...)
+		if item.RiskLevel != "" {
+			findings = append(findings, Finding{
+				Level: item.RiskLevel, Source: "服务多源核查", Name: displayName(item.Name, item.DisplayName),
+				Reason: strings.Join(item.RiskReasons, "；"), MD5: item.MD5, Signature: item.Signature,
+				SignatureMsg: item.SignatureMsg, Path: item.Path, Command: item.Command,
+				Extra: fmt.Sprintf("来源=%s；SCM=%s；注册表=%s；WMI=%s；ServiceDLL=%s", item.SourceStatus, item.SCMPath, item.RegistryImagePath, item.WMIPath, item.ServiceDLL),
+			})
+		}
 	}
 
 	for _, item := range snapshot.ScheduledTasks {
@@ -100,6 +133,31 @@ func BuildFindings(processes []process.Info, snapshot host.Snapshot) []Finding {
 		})
 	}
 
+	for _, item := range snapshot.WMISubscriptions {
+		if item.RiskLevel != levelHigh && item.RiskLevel != levelMedium {
+			continue
+		}
+		name := strings.TrimSpace(item.FilterName + " -> " + item.ConsumerName)
+		if name == "->" || name == "" {
+			name = firstFindingValue(item.FilterPath, item.ConsumerPath, item.BindingPath)
+		}
+		command := strings.TrimSpace(firstFindingValue(item.CommandLine, item.ExecutablePath, item.ScriptText))
+		findings = append(findings, Finding{
+			Level:        item.RiskLevel,
+			Source:       "WMI 永久事件订阅",
+			Name:         name,
+			Reason:       strings.Join(item.RiskReasons, "；"),
+			MD5:          item.ExecutableMD5,
+			Signature:    item.ExecutableSignature,
+			SignatureMsg: item.ExecutableSigMsg,
+			Path:         item.ExecutablePath,
+			Command:      command,
+			Extra: fmt.Sprintf("评分=%d；状态=%s；命名空间=%s；类型=%s；查询=%s；服务关联=%s；任务关联=%s",
+				item.RiskScore, item.Status, item.Namespace, item.ConsumerType, item.Query,
+				strings.Join(item.RelatedServices, ","), strings.Join(item.RelatedTasks, ",")),
+		})
+	}
+
 	for _, item := range snapshot.Users {
 		if item.LocalAccount && !item.Disabled && !item.PasswordRequired {
 			findings = append(findings, Finding{
@@ -122,6 +180,15 @@ func BuildFindings(processes []process.Info, snapshot host.Snapshot) []Finding {
 		return findings[i].Name < findings[j].Name
 	})
 	return findings
+}
+
+func firstFindingValue(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func isExpectedPowerShellEnumerationNoise(item process.Info) bool {

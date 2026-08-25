@@ -223,6 +223,8 @@
     .product { width: 220px; }
     .association { width: 130px; }
     .schema { width: 96px; }
+	.signature { width: 150px; }
+	.attributes { width: 130px; }
     .empty {
       padding: 18px;
       color: var(--muted);
@@ -298,6 +300,7 @@
       <button class="tab" data-tab="modified" data-label="最近修改">最近修改</button>
       <button class="tab" data-tab="run" data-label="最近运行">最近运行</button>
       <button class="tab" data-tab="artifacts" data-label="传统取证">传统取证</button>
+	  <button class="tab" data-tab="structure" data-label="结构异常">结构异常</button>
       <button class="tab" data-tab="temp" data-label="Temp 文件">Temp 文件</button>
       <select id="artifact-source" title="按传统取证源筛选">
         <option value="">全部取证源</option>
@@ -309,6 +312,8 @@
         <option value="lnk">LNK / JumpList</option>
         <option value="userassist">UserAssist / PCA</option>
         <option value="powershell">PowerShell 历史</option>
+		<option value="native">Go 原生落地点</option>
+		<option value="structure">敏感文件结构</option>
       </select>
     </div>
 
@@ -360,15 +365,17 @@
     }
 
     function isArtifactRecord(item) {
-      return ['执行痕迹', '命令历史', 'NTFS 元数据', 'NTFS 变更痕迹', '网络与应用痕迹', '取证源状态'].includes(item.category)
+      return ['执行痕迹', '命令历史', 'NTFS 元数据', 'NTFS 变更痕迹', '网络与应用痕迹', '取证源状态', '文件结构异常'].includes(item.category)
         || item.source === 'Prefetch'
         || item.source === 'Recent 快捷方式';
     }
 
     function tabMatches(item) {
+	  if (artifactSource.value === 'native') return true;
       if (activeTab === 'modified') return item.category === '最近修改文件';
       if (activeTab === 'run') return item.category === '最近运行文件';
       if (activeTab === 'artifacts') return isArtifactRecord(item);
+	  if (activeTab === 'structure') return item.category === '文件结构异常';
       if (activeTab === 'temp') return item.category === 'Temp 临时文件';
       if (activeTab === 'suspicious') return !!item.suspicion;
       return true;
@@ -385,6 +392,8 @@
       if (artifactSource.value === 'lnk') return source.includes('recent') || source.includes('jumplist');
       if (artifactSource.value === 'userassist') return source.includes('userassist') || source.includes('pca');
       if (artifactSource.value === 'powershell') return source.includes('powershell');
+      if (artifactSource.value === 'native') return source.includes('go 原生落地点');
+	  if (artifactSource.value === 'structure') return source.includes('敏感文件结构');
       return true;
     }
 
@@ -417,6 +426,7 @@
 
     function genericSortValue(item, key) {
       if (key === 'size') return item.size ? Number(item.size) : '';
+	  if (key === 'entropy') return Number(item.entropy || 0);
       if (key === 'suspicion') return ({ '高': 3, '中': 2, '低': 1 }[item.suspicion] || 0);
       return text(item[key]).toLowerCase();
     }
@@ -505,6 +515,8 @@
       const amcache = records.filter(x => x.source === 'Amcache Hive').length;
       const prefetch = records.filter(x => x.source === 'Prefetch').length;
       const powershell = records.filter(x => x.source === 'PowerShell PSReadLine').length;
+	  const nativeLanding = records.filter(x => x.source === 'Go 原生落地点扫描').length;
+	  const structures = records.filter(x => x.source === '敏感文件结构校验').length;
       const suspicious = records.filter(x => x.suspicion).length;
       const errors = collectionErrors.map(x => `<span class="bad" title="${escapeCell(x)}">${escapeCell(x)}</span>`).join('');
       summaryEl.innerHTML = [
@@ -515,6 +527,8 @@
         `<span class="badge info">执行痕迹 ${artifacts}</span>`,
         `<span class="badge info">Prefetch ${prefetch}</span>`,
         `<span class="badge info">PowerShell 历史 ${powershell}</span>`,
+		`<span class="badge warn">原生落地点 ${nativeLanding}</span>`,
+		`<span class="badge warn">结构异常 ${structures}</span>`,
         `<span class="badge info">USN ${usn}</span>`,
         `<span class="badge info">Amcache ${amcache}</span>`,
         `<span class="badge info">Temp ${temp}</span>`,
@@ -525,11 +539,12 @@
     }
 
     function renderGenericTable(items) {
-      table.innerHTML = `<table>
+      table.innerHTML = `<table style="min-width: 3400px">
         <thead><tr>
           ${genericHeader('分类', 'category', 'category')}${genericHeader('来源', 'source', 'source')}${genericHeader('可疑', 'suspicion', 'risk')}${genericHeader('文件名', 'name', 'name')}
           ${genericHeader('修改时间', 'modified', 'time')}${genericHeader('最近运行', 'lastRun', 'time')}${genericHeader('创建时间', 'created', 'time')}${genericHeader('大小', 'size', 'size')}
-          ${genericHeader('路径', 'path', 'path')}${genericHeader('原因', 'reason', 'reason')}${genericHeader('详情', 'details', 'details')}
+		  ${genericHeader('Magic', 'magic', 'source')}${genericHeader('熵', 'entropy', 'size')}${genericHeader('文件属性', 'attributes', 'attributes')}${genericHeader('签名', 'signature', 'signature')}
+		  ${genericHeader('SHA-256', 'sha256', 'hash')}${genericHeader('关联服务', 'relatedServices', 'association')}${genericHeader('路径', 'path', 'path')}${genericHeader('原因', 'reason', 'reason')}${genericHeader('详情', 'details', 'details')}
         </tr></thead>
         <tbody>${items.map(item => `<tr class="${rowClass(item)}">
           <td class="category" title="${escapeCell(item.category)}">${escapeCell(item.category)}</td>
@@ -540,6 +555,12 @@
           <td class="time" title="${escapeCell(item.lastRun)}">${escapeCell(item.lastRun)}</td>
           <td class="time" title="${escapeCell(item.created)}">${escapeCell(item.created)}</td>
           <td class="size" title="${escapeCell(item.size)}">${escapeCell(formatSize(item.size))}</td>
+		  <td class="source" title="${escapeCell(item.magic)}">${escapeCell(item.magic)}</td>
+		  <td class="size" title="${escapeCell(item.entropy)}">${escapeCell(item.entropy ? Number(item.entropy).toFixed(2) : '')}</td>
+		  <td class="attributes" title="${escapeCell(item.attributes)}">${escapeCell(item.attributes)}</td>
+		  <td class="signature" title="${escapeCell(item.signatureMsg)}">${escapeCell(item.signature)}</td>
+		  <td class="hash" title="${escapeCell(item.sha256)}">${escapeCell(item.sha256)}</td>
+		  <td class="association" title="${escapeCell((item.relatedServices || []).join('；'))}">${escapeCell((item.relatedServices || []).join('；'))}</td>
           <td class="path" title="${escapeCell(item.path)}">${escapeCell(item.path)}</td>
           <td class="reason" title="${escapeCell(item.reason)}">${escapeCell(item.reason)}</td>
           <td class="details" title="${escapeCell(item.details)}">${escapeCell(item.details)}</td>
@@ -627,12 +648,13 @@
       const params = new URLSearchParams({
         max: maxRecords.value || '500',
         hours: hoursEl.value || '72',
-        category: activeTab
+        category: artifactSource.value === 'native' ? 'all' : activeTab
       });
       splitRoots(modifiedRoots.value).forEach(root => params.append('root', root));
       if (amcachePath.value.trim()) params.set('amcache_path', amcachePath.value.trim());
       const q = filter.value.trim();
       if (includeFilter && q) params.set('q', q);
+	  if (includeFilter && artifactSource.value) params.set('source', artifactSource.value);
       if (refresh) params.set('refresh', '1');
       return params.toString();
     }
@@ -654,7 +676,9 @@
       table.innerHTML = roots.length
         ? `<div class="empty">正在扫描自定义目录，并采集 MFT/USN、Prefetch、Amcache、Shimcache、SRUM、LNK/JumpList、UserAssist 和 PowerShell 历史...</div>`
         : '<div class="empty">正在采集 MFT/USN、Prefetch、Amcache、Shimcache、SRUM、LNK/JumpList、UserAssist 和 PowerShell 历史...</div>';
-      const data = await loadJSON(`/api/files/traces?${queryString(false, refresh)}`);
+      const params = new URLSearchParams(queryString(false, refresh));
+	  params.set('category', 'all');
+	  const data = await loadJSON(`/api/files/traces?${params}`);
       records = data.records || [];
       collectionErrors = data.collectionErrors || [];
       notices = data.notices || [];
@@ -731,7 +755,8 @@
     });
     filter.addEventListener('input', render);
     artifactSource.addEventListener('change', () => {
-      if (artifactSource.value) activeTab = 'artifacts';
+	  if (artifactSource.value === 'native') activeTab = 'all';
+	  else if (artifactSource.value) activeTab = 'artifacts';
       render();
     });
     table.addEventListener('click', event => {

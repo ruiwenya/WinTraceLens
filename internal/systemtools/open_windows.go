@@ -20,12 +20,16 @@ func Open(id string) (Tool, error) {
 	if err != nil {
 		return Tool{}, err
 	}
+	parameters, err := syscall.UTF16PtrFromString(tool.Arguments)
+	if err != nil {
+		return Tool{}, err
+	}
 	verb, _ := syscall.UTF16PtrFromString("open")
 	ret, _, callErr := shellExecuteW.Call(
 		0,
 		uintptr(unsafe.Pointer(verb)),
 		uintptr(unsafe.Pointer(file)),
-		0,
+		uintptr(unsafe.Pointer(parameters)),
 		0,
 		uintptr(1),
 	)

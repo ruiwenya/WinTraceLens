@@ -5,10 +5,10 @@ package filetrace
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/ruiwenya/WinTraceLens/internal/winexec"
 )
@@ -599,22 +599,23 @@ $ordered = @($selected | Sort-Object @{Expression={ if ($_.LastRun) { $_.LastRun
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
+	var snapshot Snapshot
 	if err != nil {
 		msg := strings.TrimSpace(stderr.String())
 		if msg == "" {
 			msg = err.Error()
 		}
-		return Snapshot{}, errors.New(msg)
-	}
-
-	data := bytes.TrimPrefix(bytes.TrimSpace(out), []byte{0xEF, 0xBB, 0xBF})
-	if len(data) == 0 {
-		return Snapshot{}, errors.New("empty file trace output")
-	}
-
-	var snapshot Snapshot
-	if err := json.Unmarshal(data, &snapshot); err != nil {
-		return Snapshot{}, err
+		snapshot.CollectionErrors = append(snapshot.CollectionErrors, "PowerShell 文件痕迹采集: "+msg)
+		snapshot.GeneratedAt = time.Now().Format("2006-01-02 15:04:05")
+	} else {
+		data := bytes.TrimPrefix(bytes.TrimSpace(out), []byte{0xEF, 0xBB, 0xBF})
+		if len(data) == 0 {
+			snapshot.CollectionErrors = append(snapshot.CollectionErrors, "PowerShell 文件痕迹采集返回空结果")
+			snapshot.GeneratedAt = time.Now().Format("2006-01-02 15:04:05")
+		} else if decodeErr := json.Unmarshal(data, &snapshot); decodeErr != nil {
+			snapshot.CollectionErrors = append(snapshot.CollectionErrors, "PowerShell 文件痕迹解析: "+decodeErr.Error())
+			snapshot.GeneratedAt = time.Now().Format("2006-01-02 15:04:05")
+		}
 	}
 	amcacheRecords, amcacheWarnings, amcacheNotices, nativeAmcache := collectNativeAmcache(opts, maxRecords)
 	if nativeAmcache || strings.TrimSpace(opts.AmcachePath) != "" {
@@ -634,8 +635,15 @@ $ordered = @($selected | Sort-Object @{Expression={ if ($_.LastRun) { $_.LastRun
 		ntfsLimit = 1000
 	}
 	ntfsRecords, ntfsWarnings := collectNTFSArtifacts(modifiedRoots, ntfsLimit)
-	extraRecords := append(ntfsRecords, amcacheRecords...)
+	nativeLimit := maxRecords / 2
+	if nativeLimit < 150 {
+		nativeLimit = 150
+	}
+	nativeRecords, nativeWarnings := collectNativeLandingFiles(opts, nativeLimit)
+	extraRecords := append(nativeRecords, ntfsRecords...)
+	extraRecords = append(extraRecords, amcacheRecords...)
 	snapshot.Records = mergeTraceRecords(snapshot.Records, extraRecords, maxRecords)
+	snapshot.CollectionErrors = append(snapshot.CollectionErrors, nativeWarnings...)
 	snapshot.CollectionErrors = append(snapshot.CollectionErrors, ntfsWarnings...)
 	snapshot.CollectionErrors = append(snapshot.CollectionErrors, amcacheWarnings...)
 	snapshot.Notices = append(snapshot.Notices, amcacheNotices...)
@@ -662,6 +670,13 @@ func mergeTraceRecords(existing, extra []Record, limit int) []Record {
 	}
 	for _, item := range extra {
 		if item.Source == "MFT 证据定位" {
+			add(item)
+		}
+	}
+	// Structural anomalies are low-volume, high-signal records and must not be
+	// displaced by large Amcache/USN result sets.
+	for _, item := range extra {
+		if item.Source == "敏感文件结构校验" {
 			add(item)
 		}
 	}

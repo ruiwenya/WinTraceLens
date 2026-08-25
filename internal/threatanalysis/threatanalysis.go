@@ -167,12 +167,13 @@ func Build(opts Options, sources Sources) Snapshot {
 
 	snapshot.CollectionErrors = uniqueStrings(snapshot.CollectionErrors)
 	snapshot.SourceSummary = fmt.Sprintf(
-		"进程 %d，持久化 服务%d/任务%d/启动项%d/镜像劫持%d，内存异常 %d，文件痕迹 %d",
+		"进程 %d，持久化 服务%d/任务%d/启动项%d/镜像劫持%d/WMI%d，内存异常 %d，文件痕迹 %d",
 		len(processes),
 		len(hostSnapshot.Services),
 		len(hostSnapshot.ScheduledTasks),
 		len(hostSnapshot.StartupItems),
 		len(hostSnapshot.ImageHijacks),
+		len(hostSnapshot.WMISubscriptions),
 		len(memorySnapshot.Records),
 		len(traceSnapshot.Records),
 	)
@@ -207,6 +208,8 @@ func analyzeProcess(item process.Info, persistence persistenceIndex, traces trac
 	if records := memoryByPID[item.PID]; len(records) > 0 {
 		high := 0
 		thread := 0
+		hard := 0
+		hardSignals := make([]string, 0)
 		samples := make([]string, 0)
 		for _, record := range records {
 			if record.Level == "高" {
@@ -215,28 +218,42 @@ func analyzeProcess(item process.Info, persistence persistenceIndex, traces trac
 			if record.Category == "线程入口" {
 				thread++
 			}
+			if record.HasPE || len(record.HardSignals) > 0 {
+				hard++
+				for _, signal := range record.HardSignals {
+					if !containsString(hardSignals, signal) && len(hardSignals) < 4 {
+						hardSignals = append(hardSignals, signal)
+					}
+				}
+				if record.HasPE && !containsString(hardSignals, "区域内存在 PE 结构") && len(hardSignals) < 4 {
+					hardSignals = append(hardSignals, "区域内存在 PE 结构")
+				}
+			}
 			if len(samples) < 3 {
 				samples = append(samples, fmt.Sprintf("%s/%s/%s %s", record.Level, record.Category, record.Reason, record.Base))
 			}
 		}
 		points := 4
 		signal := "内存异常"
-		if high > 0 || thread > 0 {
+		if high > 0 || thread > 0 || hard > 0 {
 			points = 6
 			builder.hasStrongMem = true
 		}
 		evidencePrefix := ""
-		if expectedMemory {
+		if expectedMemory && hard == 0 && thread == 0 {
 			signal = "常见软件内存线索"
 			evidencePrefix = profile + "，已降噪；"
 			points = 1
-			if thread > 0 {
-				points = 2
-			}
 			builder.hasStrongMem = false
 			builder.hasExpected = true
+		} else if expectedMemory && (hard > 0 || thread > 0) {
+			evidencePrefix = profile + "，但存在不可由普通 JIT/Hook 直接解释的硬信号；"
 		}
-		builder.add(points, signal, fmt.Sprintf("%s内存异常 %d 条，高危 %d 条，线程入口 %d 条，样例: %s", evidencePrefix, len(records), high, thread, strings.Join(samples, " | ")))
+		hardText := ""
+		if len(hardSignals) > 0 {
+			hardText = "，硬信号: " + strings.Join(hardSignals, " / ")
+		}
+		builder.add(points, signal, fmt.Sprintf("%s内存异常 %d 条，高危 %d 条，线程入口 %d 条，硬信号区域 %d 条%s，样例: %s", evidencePrefix, len(records), high, thread, hard, hardText, strings.Join(samples, " | ")))
 		builder.hasMemory = true
 	}
 
@@ -308,6 +325,17 @@ func analyzeProcess(item process.Info, persistence persistenceIndex, traces trac
 		builder.add(3, "可疑父子进程关系", fmt.Sprintf("%s(%d) -> %s(%d)", item.ParentName, item.ParentPID, item.Name, item.PID))
 	}
 
+	if childTime, parentTime, ok := processTimes(item.CreatedAt, item.ParentCreatedAt); ok && parentTime.After(childTime.Add(2*time.Second)) {
+		builder.add(5, "父子进程时间矛盾", fmt.Sprintf("子进程创建于 %s，但当前父进程 PID %d 创建于 %s；可能是 PID 复用、父进程已退出或枚举上下文不一致", item.CreatedAt, item.ParentPID, item.ParentCreatedAt))
+	}
+
+	if builder.hasStrongMem && item.ConnectionCount > 0 {
+		builder.add(3, "异常内存与外联组合", fmt.Sprintf("存在不可直接降噪的异常内存，同时当前有 %d 条网络连接；需核查异常线程入口与远端地址", item.ConnectionCount))
+	}
+	if builder.hasStrongMem && trusted {
+		builder.add(1, "可信磁盘映像中的额外可执行内存", "磁盘文件签名可信不代表运行时新增的私有/无后备文件可执行区域可信")
+	}
+
 	if pathKey != "" {
 		if related := persistence[pathKey]; associatePersistence && len(related) > 0 {
 			if score, evidence := suspiciousPersistenceForProcess(related, normalExpected); score > 0 {
@@ -355,6 +383,13 @@ func analyzeProcess(item process.Info, persistence persistenceIndex, traces trac
 		Evidence:    strings.Join(builder.evidence, "；"),
 		Related:     strings.Join(builder.signals, " / "),
 	}, true
+}
+
+func processTimes(childRaw, parentRaw string) (time.Time, time.Time, bool) {
+	const layout = "2006-01-02 15:04:05"
+	child, childErr := time.ParseInLocation(layout, strings.TrimSpace(childRaw), time.Local)
+	parent, parentErr := time.ParseInLocation(layout, strings.TrimSpace(parentRaw), time.Local)
+	return child, parent, childErr == nil && parentErr == nil
 }
 
 func (b *evidenceBuilder) add(score int, signal, evidence string) {
@@ -413,6 +448,13 @@ func buildPersistenceIndex(snapshot host.Snapshot) persistenceIndex {
 	}
 	for _, item := range snapshot.ImageHijacks {
 		add(item.Path, "镜像劫持:"+item.Image, item.Signature, item.Debugger, item.HashError, true)
+	}
+	for _, item := range snapshot.WMISubscriptions {
+		if item.RiskLevel != "高" && item.RiskLevel != "中" {
+			continue
+		}
+		add(item.ExecutablePath, "WMI永久事件:"+firstThreatValue(item.ConsumerName, item.FilterName), item.ExecutableSignature,
+			strings.TrimSpace(item.CommandLine+" "+item.ScriptText), item.ExecutableHashErr, item.RiskLevel == "高")
 	}
 	return index
 }
@@ -548,7 +590,36 @@ func standalonePersistence(snapshot host.Snapshot, runningPaths map[string]struc
 	for _, item := range snapshot.ImageHijacks {
 		add("镜像劫持", item.Image, item.Path, item.MD5, item.Signature, item.SignatureMsg, item.Debugger, item.RegistryPath)
 	}
+	for _, item := range snapshot.WMISubscriptions {
+		if item.RiskLevel != "高" && item.RiskLevel != "中" {
+			continue
+		}
+		name := firstThreatValue(item.ConsumerName, item.FilterName, item.Status)
+		if item.ExecutablePath != "" {
+			add("WMI 永久事件订阅", name, item.ExecutablePath, item.ExecutableMD5, item.ExecutableSignature, item.ExecutableSigMsg,
+				strings.TrimSpace(item.CommandLine+" "+item.ScriptText), strings.Join(item.RiskReasons, "；"))
+			continue
+		}
+		score := 4
+		if item.RiskLevel == "高" {
+			score = 6
+		}
+		items = append(items, Item{
+			Level: item.RiskLevel, Scenario: "可疑持久化项", Score: score, Process: "WMI 永久事件订阅",
+			Summary: "WMI 永久事件订阅:" + name, Evidence: strings.Join(item.RiskReasons, "；"),
+			Related: strings.TrimSpace(item.Query + " " + item.CommandLine),
+		})
+	}
 	return items
+}
+
+func firstThreatValue(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func standaloneTraces(snapshot filetrace.Snapshot, runningPaths map[string]struct{}) []Item {

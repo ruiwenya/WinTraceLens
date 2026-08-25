@@ -3,7 +3,11 @@
 package memoryscan
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"math"
+	"regexp"
 	"sort"
 	"strings"
 	"syscall"
@@ -38,6 +42,8 @@ const (
 	maxPath               = 260
 	maxModuleName32       = 255
 	maxAddressWalkRegions = 200000
+	maxFingerprintBytes   = 8 * 1024 * 1024
+	maxPreviewBytes       = 256 * 1024
 )
 
 var (
@@ -47,12 +53,15 @@ var (
 	procOpenThread             = modKernel32.NewProc("OpenThread")
 	procCloseHandle            = modKernel32.NewProc("CloseHandle")
 	procVirtualQueryEx         = modKernel32.NewProc("VirtualQueryEx")
+	procReadProcessMemory      = modKernel32.NewProc("ReadProcessMemory")
 	procCreateToolhelpSnapshot = modKernel32.NewProc("CreateToolhelp32Snapshot")
 	procModule32FirstW         = modKernel32.NewProc("Module32FirstW")
 	procModule32NextW          = modKernel32.NewProc("Module32NextW")
 	procThread32First          = modKernel32.NewProc("Thread32First")
 	procThread32Next           = modKernel32.NewProc("Thread32Next")
 	procNTQueryInfoThread      = modNTDLL.NewProc("NtQueryInformationThread")
+	modPSAPI                   = syscall.NewLazyDLL("psapi.dll")
+	procGetMappedFileNameW     = modPSAPI.NewProc("GetMappedFileNameW")
 )
 
 type memoryBasicInformation struct {
@@ -99,12 +108,27 @@ type moduleRange struct {
 }
 
 type execRegion struct {
-	Base       uintptr
-	End        uintptr
-	Size       uintptr
-	Protect    uint32
-	MemoryType uint32
+	Base              uintptr
+	End               uintptr
+	Size              uintptr
+	Protect           uint32
+	AllocationProtect uint32
+	MemoryType        uint32
+	BackingFile       string
+	Fingerprint       regionFingerprint
 }
+
+type regionFingerprint struct {
+	SHA256         string
+	HashScope      string
+	Entropy        float64
+	HexPreview     string
+	StringsPreview string
+	HasMZ          bool
+	HasPE          bool
+}
+
+var memoryIndicatorPattern = regexp.MustCompile(`(?i)(https?://|(?:\d{1,3}\.){3}\d{1,3}|powershell|cmd\.exe|rundll32|regsvr32|mshta|virtualalloc|virtualprotect|writeprocessmemory|createremotethread|loadlibrary|getprocaddress|winexec|shellexecute)`)
 
 func Collect(opts Options) (Snapshot, error) {
 	processes, err := process.Collect(process.Options{
@@ -212,32 +236,47 @@ func inspectProcess(item process.Info, opts Options) (bool, bool, []Record, []st
 
 		if mbi.State == memCommit && isExecutableProtect(mbi.Protect) && !isGuardOrNoAccess(mbi.Protect) {
 			region := execRegion{
-				Base:       mbi.BaseAddress,
-				End:        safeEnd(mbi.BaseAddress, mbi.RegionSize),
-				Size:       mbi.RegionSize,
-				Protect:    mbi.Protect,
-				MemoryType: mbi.Type,
+				Base:              mbi.BaseAddress,
+				End:               safeEnd(mbi.BaseAddress, mbi.RegionSize),
+				Size:              mbi.RegionSize,
+				Protect:           mbi.Protect,
+				AllocationProtect: mbi.AllocationProtect,
+				MemoryType:        mbi.Type,
 			}
-			regions = append(regions, region)
 			if level, reason := suspiciousRegion(mbi); reason != "" {
+				region.BackingFile = mappedFileName(handle, mbi.BaseAddress)
+				region.Fingerprint = fingerprintRegion(handle, region)
 				if countProcessRecords(records) < opts.MaxRegionsPerProcess {
 					record := Record{
-						Level:      level,
-						Category:   "内存区域",
-						PID:        item.PID,
-						Process:    item.Name,
-						Path:       item.Path,
-						Reason:     reason,
-						Base:       hexAddress(mbi.BaseAddress),
-						Size:       uint64(mbi.RegionSize),
-						Protect:    protectName(mbi.Protect),
-						MemoryType: memoryTypeName(mbi.Type),
-						Details:    fmt.Sprintf("AllocationProtect=%s", protectName(mbi.AllocationProtect)),
+						Level:             level,
+						Category:          "内存区域",
+						PID:               item.PID,
+						Process:           item.Name,
+						Path:              item.Path,
+						Reason:            reason,
+						Base:              hexAddress(mbi.BaseAddress),
+						RegionBase:        hexAddress(mbi.BaseAddress),
+						Size:              uint64(mbi.RegionSize),
+						Protect:           protectName(mbi.Protect),
+						AllocationProtect: protectName(mbi.AllocationProtect),
+						MemoryType:        memoryTypeName(mbi.Type),
+						BackingFile:       region.BackingFile,
+						SHA256:            region.Fingerprint.SHA256,
+						HashScope:         region.Fingerprint.HashScope,
+						Entropy:           region.Fingerprint.Entropy,
+						HexPreview:        region.Fingerprint.HexPreview,
+						StringsPreview:    region.Fingerprint.StringsPreview,
+						HasMZ:             region.Fingerprint.HasMZ,
+						HasPE:             region.Fingerprint.HasPE,
+						Exportable:        true,
+						Details:           fmt.Sprintf("AllocationProtect=%s", protectName(mbi.AllocationProtect)),
 					}
+					applyRegionSignals(region, &record)
 					applyProcessContext(item, &record)
 					records = append(records, record)
 				}
 			}
+			regions = append(regions, region)
 		}
 
 		next := safeEnd(mbi.BaseAddress, mbi.RegionSize)
@@ -250,16 +289,16 @@ func inspectProcess(item process.Info, opts Options) (bool, bool, []Record, []st
 	if walked >= maxAddressWalkRegions {
 		errors = append(errors, fmt.Sprintf("PID %d %s: 内存区域过多，已停止枚举", item.PID, item.Name))
 	}
-	records = compactExpectedMemoryRecords(records)
-
 	if opts.IncludeThreads && len(records) < opts.MaxRegionsPerProcess {
 		modules, err := processModules(item.PID)
 		if err == nil && len(modules) > 0 {
 			threadRecords, threadErrors := suspiciousThreads(item, modules, regions, opts.MaxRegionsPerProcess-len(records))
+			promoteRegionRecords(records, threadRecords)
 			records = append(records, threadRecords...)
 			errors = append(errors, threadErrors...)
 		}
 	}
+	records = compactExpectedMemoryRecords(records)
 
 	return true, false, records, errors
 }
@@ -363,18 +402,44 @@ func suspiciousThreads(item process.Info, modules []moduleRange, regions []execR
 			if region.MemoryType == memPrivate {
 				level = "高"
 				reason = "线程入口位于私有可执行内存"
+			} else if region.MemoryType == memMapped && region.BackingFile == "" {
+				level = "高"
+				reason = "线程入口位于无后备文件的映射可执行内存"
 			}
 		}
 		record := Record{
-			Level:    level,
-			Category: "线程入口",
-			PID:      item.PID,
-			Process:  item.Name,
-			Path:     item.Path,
-			Reason:   reason,
-			Base:     hexAddress(start),
-			ThreadID: threadID,
-			Details:  details,
+			Level:      level,
+			Category:   "线程入口",
+			PID:        item.PID,
+			Process:    item.Name,
+			Path:       item.Path,
+			Reason:     reason,
+			Base:       hexAddress(start),
+			ThreadID:   threadID,
+			Details:    details,
+			Exportable: region != nil,
+		}
+		if region != nil {
+			record.RegionBase = hexAddress(region.Base)
+			record.Size = uint64(region.Size)
+			record.Protect = protectName(region.Protect)
+			record.AllocationProtect = protectName(region.AllocationProtect)
+			record.MemoryType = memoryTypeName(region.MemoryType)
+			record.BackingFile = region.BackingFile
+			record.SHA256 = region.Fingerprint.SHA256
+			record.HashScope = region.Fingerprint.HashScope
+			record.Entropy = region.Fingerprint.Entropy
+			record.HexPreview = region.Fingerprint.HexPreview
+			record.StringsPreview = region.Fingerprint.StringsPreview
+			record.HasMZ = region.Fingerprint.HasMZ
+			record.HasPE = region.Fingerprint.HasPE
+			record.HardSignals = append(record.HardSignals, "异常线程入口位于未加载模块的可执行区域")
+			if region.MemoryType == memPrivate {
+				record.HardSignals = append(record.HardSignals, "线程入口位于 MEM_PRIVATE 可执行内存")
+			}
+			if region.MemoryType == memMapped && region.BackingFile == "" {
+				record.HardSignals = append(record.HardSignals, "线程入口位于无后备文件的 MEM_MAPPED 可执行内存")
+			}
 		}
 		applyProcessContext(item, &record)
 		records = append(records, record)
@@ -479,6 +544,272 @@ func regionForAddress(regions []execRegion, address uintptr) *execRegion {
 	return nil
 }
 
+func mappedFileName(processHandle uintptr, address uintptr) string {
+	buffer := make([]uint16, 32768)
+	ret, _, _ := procGetMappedFileNameW.Call(
+		processHandle,
+		address,
+		uintptr(unsafe.Pointer(&buffer[0])),
+		uintptr(len(buffer)),
+	)
+	if ret == 0 {
+		return ""
+	}
+	return syscall.UTF16ToString(buffer[:ret])
+}
+
+func fingerprintRegion(processHandle uintptr, region execRegion) regionFingerprint {
+	limit := region.Size
+	if limit > maxFingerprintBytes {
+		limit = maxFingerprintBytes
+	}
+	data, complete := readMemory(processHandle, region.Base, limit)
+	if len(data) == 0 {
+		return regionFingerprint{}
+	}
+	sum := sha256.Sum256(data)
+	previewData := data
+	if len(previewData) > maxPreviewBytes {
+		previewData = previewData[:maxPreviewBytes]
+	}
+	hasPE := containsEmbeddedPE(previewData)
+	hashScope := fmt.Sprintf("区域前 %d 字节", len(data))
+	if complete && uintptr(len(data)) == region.Size {
+		hashScope = "完整区域"
+	}
+	return regionFingerprint{
+		SHA256:         hex.EncodeToString(sum[:]),
+		HashScope:      hashScope,
+		Entropy:        math.Round(memoryEntropy(previewData)*100) / 100,
+		HexPreview:     memoryHexPreview(previewData, 64),
+		StringsPreview: memoryStringsPreview(previewData, 320),
+		HasMZ:          strings.Contains(string(previewData), "MZ"),
+		HasPE:          hasPE,
+	}
+}
+
+func readMemory(processHandle uintptr, base uintptr, size uintptr) ([]byte, bool) {
+	if size == 0 {
+		return nil, false
+	}
+	buffer := make([]byte, int(size))
+	var bytesRead uintptr
+	ret, _, _ := procReadProcessMemory.Call(
+		processHandle,
+		base,
+		uintptr(unsafe.Pointer(&buffer[0])),
+		size,
+		uintptr(unsafe.Pointer(&bytesRead)),
+	)
+	if bytesRead == 0 {
+		return nil, false
+	}
+	if bytesRead < uintptr(len(buffer)) {
+		buffer = buffer[:bytesRead]
+	}
+	return buffer, ret != 0 && bytesRead == size
+}
+
+func applyRegionSignals(region execRegion, record *Record) {
+	if region.MemoryType == memPrivate && isWritableExecutable(region.Protect) && region.Size >= 1024*1024 {
+		appendHardSignal(record, "大体积私有 RWX 区域")
+	}
+	if region.Fingerprint.HasPE {
+		appendHardSignal(record, "区域中存在有效 PE 结构")
+	} else if region.Fingerprint.HasMZ {
+		record.Details = appendDetail(record.Details, "区域中出现 MZ 特征，但未确认有效 PE 头")
+	}
+	if region.MemoryType == memMapped && region.BackingFile == "" {
+		record.Details = appendDetail(record.Details, "未解析到映射区域后备文件")
+	}
+	if region.Fingerprint.Entropy >= 7.20 {
+		record.Details = appendDetail(record.Details, fmt.Sprintf("样本熵 %.2f", region.Fingerprint.Entropy))
+	}
+	if memoryIndicatorPattern.MatchString(region.Fingerprint.StringsPreview) {
+		record.Details = appendDetail(record.Details, "区域字符串包含脚本、网络或注入 API 线索")
+		if record.Level == "低" {
+			record.Level = "中"
+		}
+	}
+	if len(record.HardSignals) > 0 {
+		record.Level = "高"
+		record.Reason = appendDetail(record.Reason, strings.Join(record.HardSignals, "；"))
+	}
+}
+
+func promoteRegionRecords(records []Record, threads []Record) {
+	for _, thread := range threads {
+		if thread.RegionBase == "" {
+			continue
+		}
+		for i := range records {
+			if records[i].RegionBase != thread.RegionBase {
+				continue
+			}
+			appendHardSignal(&records[i], fmt.Sprintf("线程 %d 的入口位于该区域", thread.ThreadID))
+			if thread.Level == "高" {
+				records[i].Level = "高"
+			}
+			records[i].Reason = appendDetail(records[i].Reason, fmt.Sprintf("异常线程入口 %s", thread.Base))
+			break
+		}
+	}
+}
+
+func appendHardSignal(record *Record, signal string) {
+	for _, existing := range record.HardSignals {
+		if existing == signal {
+			return
+		}
+	}
+	record.HardSignals = append(record.HardSignals, signal)
+}
+
+func memoryEntropy(data []byte) float64 {
+	if len(data) == 0 {
+		return 0
+	}
+	var counts [256]int
+	for _, value := range data {
+		counts[value]++
+	}
+	var result float64
+	for _, count := range counts {
+		if count == 0 {
+			continue
+		}
+		p := float64(count) / float64(len(data))
+		result -= p * math.Log2(p)
+	}
+	return result
+}
+
+func containsEmbeddedPE(data []byte) bool {
+	for search := 0; search+0x40 < len(data); {
+		relative := strings.Index(string(data[search:]), "MZ")
+		if relative < 0 {
+			return false
+		}
+		base := search + relative
+		if base+0x40 <= len(data) {
+			offset := uint32(data[base+0x3c]) | uint32(data[base+0x3d])<<8 | uint32(data[base+0x3e])<<16 | uint32(data[base+0x3f])<<24
+			pe := base + int(offset)
+			if offset >= 0x40 && pe+4 <= len(data) && string(data[pe:pe+4]) == "PE\x00\x00" {
+				return true
+			}
+		}
+		search = base + 2
+	}
+	return false
+}
+
+func memoryHexPreview(data []byte, limit int) string {
+	if len(data) > limit {
+		data = data[:limit]
+	}
+	return strings.ToUpper(hex.EncodeToString(data))
+}
+
+func memoryStringsPreview(data []byte, limit int) string {
+	parts := make([]string, 0, 12)
+	var current strings.Builder
+	flush := func() {
+		if current.Len() >= 5 {
+			parts = append(parts, current.String())
+		}
+		current.Reset()
+	}
+	for _, value := range data {
+		if value >= 0x20 && value <= 0x7e {
+			current.WriteByte(value)
+		} else {
+			flush()
+		}
+		if len(parts) >= 16 {
+			break
+		}
+	}
+	flush()
+	joined := strings.Join(parts, " | ")
+	if len(joined) > limit {
+		joined = joined[:limit] + "..."
+	}
+	return joined
+}
+
+func ExportRegion(pid uint32, base, size, maxSize uint64) (RegionExport, error) {
+	if base == 0 || size == 0 {
+		return RegionExport{}, fmt.Errorf("区域基址和大小不能为空")
+	}
+	if maxSize == 0 {
+		maxSize = 128 * 1024 * 1024
+	}
+	if size > maxSize {
+		return RegionExport{}, fmt.Errorf("区域大小 %d 超过导出上限 %d", size, maxSize)
+	}
+	handle, _, err := procOpenProcess.Call(processQueryInformation|processVMRead, 0, uintptr(pid))
+	if handle == 0 {
+		return RegionExport{}, fmt.Errorf("打开 PID %d 失败: %v", pid, err)
+	}
+	defer procCloseHandle.Call(handle)
+	var mbi memoryBasicInformation
+	ret, _, queryErr := procVirtualQueryEx.Call(handle, uintptr(base), uintptr(unsafe.Pointer(&mbi)), unsafe.Sizeof(mbi))
+	if ret == 0 {
+		return RegionExport{}, fmt.Errorf("查询区域失败: %v", queryErr)
+	}
+	if uint64(mbi.BaseAddress) != base {
+		return RegionExport{}, fmt.Errorf("区域基址已变化，请刷新内存异常后重试")
+	}
+	if mbi.State != memCommit || isGuardOrNoAccess(mbi.Protect) {
+		return RegionExport{}, fmt.Errorf("区域已不可读，请刷新内存异常后重试")
+	}
+	if size > uint64(mbi.RegionSize) {
+		size = uint64(mbi.RegionSize)
+	}
+	data := make([]byte, 0, int(size))
+	remaining := size
+	current := uintptr(base)
+	const chunkSize = uint64(1024 * 1024)
+	for remaining > 0 {
+		readSize := remaining
+		if readSize > chunkSize {
+			readSize = chunkSize
+		}
+		chunk, _ := readMemory(handle, current, uintptr(readSize))
+		if len(chunk) == 0 {
+			break
+		}
+		data = append(data, chunk...)
+		current += uintptr(len(chunk))
+		remaining -= uint64(len(chunk))
+		if uint64(len(chunk)) < readSize {
+			break
+		}
+	}
+	if len(data) == 0 {
+		return RegionExport{}, fmt.Errorf("ReadProcessMemory 未读取到数据")
+	}
+	sum := sha256.Sum256(data)
+	warning := ""
+	if uint64(len(data)) != size {
+		warning = fmt.Sprintf("区域仅读取 %d / %d 字节，可能因页面状态变化或权限限制", len(data), size)
+	}
+	return RegionExport{
+		PID:               pid,
+		Base:              hexAddress(uintptr(base)),
+		Size:              size,
+		BytesRead:         uint64(len(data)),
+		Protect:           protectName(mbi.Protect),
+		AllocationProtect: protectName(mbi.AllocationProtect),
+		MemoryType:        memoryTypeName(mbi.Type),
+		BackingFile:       mappedFileName(handle, mbi.BaseAddress),
+		SHA256:            hex.EncodeToString(sum[:]),
+		CollectedAt:       time.Now().Format("2006-01-02 15:04:05"),
+		Warning:           warning,
+		Data:              data,
+	}, nil
+}
+
 func isExecutableProtect(protect uint32) bool {
 	switch protect & 0xff {
 	case pageExecute, pageExecuteRead, pageExecuteReadWrite, pageExecuteWriteCopy:
@@ -551,6 +882,10 @@ func applyProcessContext(item process.Info, record *Record) {
 		return
 	}
 	record.Context = context
+	if len(record.HardSignals) > 0 {
+		record.Details = appendDetail(record.Details, "可信签名或常见软件上下文不覆盖内存硬信号")
+		return
+	}
 	if record.Category == "线程入口" {
 		if record.Level == "高" {
 			record.Level = "中"

@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WinTraceLens - 注册表异常</title>
+  <style>
+    :root { --bg:#f5f7fb; --panel:#fff; --line:#d9e0ea; --line-soft:#edf1f6; --text:#182235; --muted:#5b6678; --head:#243447; --head-2:#edf3f8; --accent:#1769aa; --accent-dark:#0f4e82; --ok:#176b43; --warn:#9a5200; --bad:#a41220; --info:#2b5b91; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font:14px "Segoe UI","Microsoft YaHei",Arial,sans-serif; letter-spacing:0; }
+    header { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:13px 18px; background:var(--head); color:#fff; }
+    h1 { margin:0; font-size:18px; font-weight:650; }
+    main { display:grid; grid-template-rows:auto auto auto minmax(0,1fr); gap:10px; height:calc(100vh - 48px); min-height:650px; padding:12px; }
+    .toolbar,.summary,.quick-filters { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    input,select { height:34px; padding:6px 10px; border:1px solid var(--line); border-radius:4px; background:#fff; color:var(--text); font:inherit; }
+    input { flex:1 1 320px; min-width:260px; }
+    select { width:128px; }
+    button { display:inline-flex; align-items:center; justify-content:center; height:34px; padding:0 12px; border:1px solid var(--accent-dark); border-radius:4px; background:var(--accent); color:#fff; cursor:pointer; font:inherit; }
+    button.secondary,.quick-filters button { border-color:var(--line); background:#fff; color:var(--text); }
+    button.active { border-color:var(--accent); background:#e8f2fb; color:var(--accent-dark); }
+    button:disabled { cursor:not-allowed; opacity:.5; }
+    .status { color:var(--muted); font-size:13px; white-space:nowrap; }
+    .badge { display:inline-flex; align-items:center; height:26px; padding:0 9px; border:1px solid var(--line); border-radius:999px; background:#fff; font-size:12px; white-space:nowrap; }
+    .badge.ok { border-color:#b8d7c8; background:#edf8f2; color:var(--ok); }
+    .badge.warn { border-color:#f0ce9f; background:#fff7e8; color:var(--warn); }
+    .badge.bad { border-color:#edb4bd; background:#fff0f2; color:var(--bad); }
+    .badge.info { border-color:#c7d7ee; background:#eef5fd; color:var(--info); }
+    .notice { padding:9px 11px; border-left:4px solid #6f8094; background:#f3f6f9; color:#46566b; line-height:1.5; }
+    .panel { min-height:260px; overflow:hidden; border:1px solid var(--line); border-radius:6px; background:var(--panel); }
+    .table-wrap { height:100%; overflow:auto; }
+    table { width:100%; min-width:2220px; border-collapse:collapse; table-layout:fixed; }
+    th,td { padding:8px 10px; border-bottom:1px solid var(--line-soft); text-align:left; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    th { position:sticky; top:0; z-index:1; background:var(--head-2); color:#26384f; font-weight:650; }
+    th.sortable { cursor:pointer; user-select:none; }
+    th.sortable:hover { background:#dfeaf4; }
+    tbody tr:hover td { background:#f3f8ff; }
+    tbody tr.high td { background:#fff0f2; }
+    tbody tr.medium td { background:#fff9ed; }
+    .risk{width:80px}.score{width:72px}.hive{width:78px}.sid{width:190px}.path{width:360px}.name{width:160px}.type{width:130px}.size{width:110px}.time{width:175px}.hash{width:470px;font-family:Consolas,"Courier New",monospace}.entropy{width:85px}.reason{width:320px}.association{width:260px}.preview{width:300px}.action{width:175px}
+    .row-actions { display:flex; align-items:center; gap:6px; }
+    .row-actions button { height:28px; padding:0 9px; font-size:12px; }
+    .empty { padding:18px; color:var(--muted); }
+    .bad-text { color:var(--bad); }
+    .sort-mark { color:var(--accent); }
+    dialog { width:min(920px,calc(100vw - 40px)); max-height:calc(100vh - 60px); padding:0; border:1px solid var(--line); border-radius:6px; box-shadow:0 16px 48px rgba(20,38,62,.28); }
+    dialog::backdrop { background:rgba(16,28,42,.42); }
+    .dialog-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 14px; border-bottom:1px solid var(--line); background:var(--head-2); }
+    .dialog-head h2 { margin:0; font-size:16px; }
+    .dialog-body { max-height:calc(100vh - 150px); overflow:auto; padding:14px; }
+    .dialog-grid { display:grid; grid-template-columns:160px minmax(0,1fr); gap:1px; border:1px solid var(--line); background:var(--line); }
+    .dialog-grid dt,.dialog-grid dd { margin:0; padding:8px 10px; background:#fff; overflow-wrap:anywhere; }
+    .dialog-grid dt { color:var(--muted); font-weight:600; }
+    .dialog-code { margin-top:12px; padding:10px; overflow:auto; border:1px solid var(--line); background:#f7f9fc; font:12px/1.55 Consolas,"Courier New",monospace; white-space:pre-wrap; overflow-wrap:anywhere; }
+  </style>
+  <link rel="stylesheet" href="/nav.css">
+  <script src="/app.js"></script>
+</head>
+<body>
+  <header>
+    <h1>WinTraceLens</h1>
+    <div class="app-meta">
+      <span class="release-badge" data-app-version>2.0 预览版</span>
+      <span class="permission-badge unknown" data-admin-status>权限检测中</span>
+      <span class="module-title">注册表异常证据</span>
+    </div>
+  </header>
+  <main>
+    <div class="toolbar">
+      <nav class="top-nav" aria-label="主要功能">
+        <a class="nav-link" href="/">进程信息</a><a class="nav-link" href="/host.html">主机信息</a><a class="nav-link" href="/findings.html">风险线索</a><a class="nav-link" href="/threat.html">威胁分析</a><a class="nav-link" href="/investigation.html">案件调查</a><a class="nav-link" aria-current="page" href="/registry.html">注册表异常</a><a class="nav-link" href="/filetrace.html">文件痕迹</a><a class="nav-link" href="/history.html">历史通信</a><a class="nav-link" href="/security.html">事件日志</a><a class="nav-link" href="/yara.html">YARA扫描</a><a class="nav-link" href="/ai.html">AI分析</a>
+      </nav>
+      <span class="current-module">当前：注册表异常</span>
+      <button id="refresh">重新扫描</button>
+      <button id="export-csv" class="secondary" disabled>导出 CSV</button>
+      <select id="max-records" title="最多返回异常记录"><option value="300">最多 300</option><option value="500" selected>最多 500</option><option value="1000">最多 1000</option></select>
+      <input id="filter" placeholder="键路径、值名、哈希、原因、进程或服务；支持 /正则/i">
+      <span id="status" class="status">尚未加载</span>
+    </div>
+    <div class="quick-filters" aria-label="风险筛选">
+      <button class="active" data-risk="all">全部</button><button data-risk="高">高风险</button><button data-risk="中">中风险</button><button data-risk="低">低风险</button>
+    </div>
+    <div>
+      <div id="summary" class="summary"></div>
+      <div class="notice"><strong>分析边界：</strong>只扫描传统持久化位置和已加载用户 Hive 的 Software 高价值区域；大体积 REG_BINARY 仅是待核查信号，必须与高熵、PE/代码特征、异常位置或其他主机证据组合判断。导出操作只读取选中的值，不会执行其中内容。</div>
+    </div>
+    <section class="panel"><div id="table" class="table-wrap"><div class="empty">正在准备注册表异常分析...</div></div></section>
+  </main>
+  <dialog id="registry-detail-dialog">
+    <div class="dialog-head"><h2 id="registry-detail-title">注册表异常详情</h2><button id="registry-detail-close" class="secondary">关闭</button></div>
+    <div id="registry-detail-body" class="dialog-body"></div>
+  </dialog>
+  <script>
+    const table=document.getElementById('table'),filter=document.getElementById('filter'),statusEl=document.getElementById('status'),summary=document.getElementById('summary'),maxRecords=document.getElementById('max-records'),exportCSV=document.getElementById('export-csv');
+    const registryDialog=document.getElementById('registry-detail-dialog'),registryDialogBody=document.getElementById('registry-detail-body'),registryDialogTitle=document.getElementById('registry-detail-title');
+    let records=[],snapshot=null,risk='all',sortState={key:'score',direction:'desc'};
+    const text=v=>v==null?'':String(v);
+    const escapeCell=v=>text(v).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+    const riskRank=v=>({'高':3,'中':2,'低':1}[v]||0);
+    function badge(v){if(v==='高')return'<span class="badge bad">高</span>';if(v==='中')return'<span class="badge warn">中</span>';return'<span class="badge info">低</span>'}
+    function rowClass(v){return v==='高'?'high':v==='中'?'medium':''}
+    function formatSize(v){const n=Number(v||0);if(n>=1048576)return`${(n/1048576).toFixed(1)} MB`;if(n>=1024)return`${(n/1024).toFixed(1)} KB`;return`${n} B`}
+    function valueOf(item,key){if(key==='score'||key==='dataLength'||key==='entropy')return Number(item[key]||0);if(key==='level')return riskRank(item.level);return text(item[key]).toLowerCase()}
+    function visible(){const q=filter.value.trim(),dir=sortState.direction==='asc'?1:-1;return records.filter(x=>(risk==='all'||x.level===risk)&&(!q||window.wtlMatchesQuery(q,Object.values(x)))).sort((a,b)=>{const av=valueOf(a,sortState.key),bv=valueOf(b,sortState.key);if(av<bv)return-dir;if(av>bv)return dir;return text(a.keyPath).localeCompare(text(b.keyPath),'zh-CN')})}
+    function header(label,key,cls){const mark=sortState.key===key?(sortState.direction==='asc'?' ↑':' ↓'):'';return`<th class="${cls} sortable" data-sort="${key}" title="单击按${escapeCell(label)}排序">${escapeCell(label)}<span class="sort-mark">${mark}</span></th>`}
+    function renderSummary(){const counts={高:0,中:0,低:0};records.forEach(x=>counts[x.level]=(counts[x.level]||0)+1);summary.innerHTML=`<span class="badge info">异常 ${records.length}</span><span class="badge bad">高 ${counts.高}</span><span class="badge warn">中 ${counts.中}</span><span class="badge info">低 ${counts.低}</span><span class="badge info">扫描键 ${snapshot?.scannedKeys||0}</span><span class="badge info">扫描值 ${snapshot?.scannedValues||0}</span>${snapshot?.truncated?'<span class="badge warn">已达到扫描边界</span>':''}`}
+    function render(){
+      let items;
+      try{items=visible()}catch(err){table.innerHTML=`<div class="empty bad-text">${escapeCell(err.message||err)}</div>`;statusEl.textContent='搜索表达式无效';return}
+      renderSummary();
+      statusEl.textContent=`显示 ${items.length} / ${records.length}`;
+      if(!items.length){table.innerHTML='<div class="empty">没有匹配的注册表异常记录</div>';return}
+      table.innerHTML=`<table><thead><tr>
+        ${header('风险','level','risk')}${header('评分','score','score')}${header('Hive','hive','hive')}${header('键路径','keyPath','path')}${header('值名','valueName','name')}${header('类型','valueType','type')}${header('长度','dataLength','size')}${header('最后写入','lastWrite','time')}
+        <th class="reason">异常原因</th><th class="association">关联证据</th><th class="preview">字符串预览</th><th class="action">操作</th>
+      </tr></thead><tbody>${items.map(x=>`<tr class="${rowClass(x.level)}">
+        <td class="risk">${badge(x.level)}</td><td class="score">${escapeCell(x.score)}</td><td class="hive">${escapeCell(x.hive)}</td>
+        <td class="path" title="${escapeCell(x.keyPath)}">${escapeCell(x.keyPath)}</td><td class="name" title="${escapeCell(x.valueName)}">${escapeCell(x.valueName)}</td><td class="type">${escapeCell(x.valueType)}</td>
+        <td class="size" title="${escapeCell(x.dataLength)}">${escapeCell(formatSize(x.dataLength))}</td><td class="time">${escapeCell(x.lastWrite)}</td>
+        <td class="reason" title="${escapeCell((x.reasons||[]).join('；'))}">${escapeCell((x.reasons||[]).join('；'))}</td><td class="association" title="${escapeCell((x.associations||[]).join('；'))}">${escapeCell((x.associations||[]).join('；'))}</td>
+        <td class="preview" title="${escapeCell(x.stringsPreview)}">${escapeCell(x.stringsPreview)}</td><td class="action"><div class="row-actions"><button class="secondary registry-detail" data-index="${records.indexOf(x)}">详情</button><button class="secondary export-value" data-id="${escapeCell(x.id)}">导出值</button></div></td>
+      </tr>`).join('')}</tbody></table>`
+    }
+    function showRegistryDetail(item){
+      registryDialogTitle.textContent=`${item.hive||'注册表'} | ${item.valueName||'(默认)'}`;
+      const rows=[
+        ['风险等级 / 评分',`${item.level||'-'} / ${item.score??'-'}`],['Hive',item.hive],['用户 SID',item.sid],['键路径',item.keyPath],['值名',item.valueName],['值类型',item.valueType],
+        ['数据长度',`${formatSize(item.dataLength)} (${item.dataLength||0} bytes)`],['最后写入',item.lastWrite],['SHA-256',item.sha256],['哈希范围',item.hashScope],['熵',Number(item.entropy||0).toFixed(2)],
+        ['数据截断',item.dataTruncated?'是，仅采集了受限长度':'否'],['传统持久化位置',item.traditionalPath?'是':'否'],['异常原因',(item.reasons||[]).join('；')],['关联证据',(item.associations||[]).join('；')]
+      ];
+      registryDialogBody.innerHTML=`<dl class="dialog-grid">${rows.map(([k,v])=>`<dt>${escapeCell(k)}</dt><dd>${escapeCell(v==null||v===''?'-':v)}</dd>`).join('')}</dl><div class="dialog-code"><strong>十六进制预览</strong>\n${escapeCell(item.hexPreview||'-')}\n\n<strong>字符串预览</strong>\n${escapeCell(item.stringsPreview||'-')}</div>`;
+      if(typeof registryDialog.showModal==='function')registryDialog.showModal();else registryDialog.setAttribute('open','');
+    }
+    function query(refresh=false,includeFilter=false){const p=new URLSearchParams({max:maxRecords.value||'500',risk});if(refresh)p.set('refresh','1');if(includeFilter&&filter.value.trim())p.set('q',filter.value.trim());return p.toString()}
+    async function load(refresh=false){statusEl.textContent='正在扫描注册表高价值区域...';exportCSV.disabled=true;table.innerHTML='<div class="empty">正在扫描传统持久化位置和已加载用户 Software Hive...</div>';const res=await fetch(`/api/registry/anomalies?${query(refresh)}`,{cache:'no-store'});if(!res.ok)throw new Error(await res.text()||res.statusText);snapshot=await res.json();records=snapshot.records||[];exportCSV.disabled=false;if(snapshot.collectionErrors?.length)statusEl.textContent=snapshot.collectionErrors.join(' | ');render()}
+    document.getElementById('refresh').addEventListener('click',()=>load(true).catch(err=>{table.innerHTML=`<div class="empty bad-text">${escapeCell(err.message)}</div>`;statusEl.textContent='扫描失败'}));
+    document.querySelectorAll('[data-risk]').forEach(btn=>btn.addEventListener('click',()=>{risk=btn.dataset.risk;document.querySelectorAll('[data-risk]').forEach(x=>x.classList.toggle('active',x===btn));render()}));
+    filter.addEventListener('input',render);maxRecords.addEventListener('change',()=>load().catch(err=>statusEl.textContent=err.message));
+    exportCSV.addEventListener('click',()=>window.wtlDownload(`/api/registry/anomalies.csv?${query(false,true)}`).catch(err=>statusEl.textContent=`导出失败：${err.message||err}`));
+    table.addEventListener('click',event=>{
+      const sort=event.target.closest('[data-sort]');
+      if(sort){const key=sort.dataset.sort;if(sortState.key===key)sortState.direction=sortState.direction==='asc'?'desc':'asc';else sortState={key,direction:key==='score'||key==='level'||key==='dataLength'||key==='lastWrite'?'desc':'asc'};render();return}
+      const detail=event.target.closest('.registry-detail');
+      if(detail){const item=records[Number(detail.dataset.index)];if(item)showRegistryDetail(item);return}
+      const button=event.target.closest('.export-value');
+      if(button){button.disabled=true;statusEl.textContent='正在导出选中注册表值...';window.wtlDownload(`/api/registry/export?id=${encodeURIComponent(button.dataset.id)}`).then(()=>statusEl.textContent='注册表值证据已导出').catch(err=>statusEl.textContent=`导出失败：${err.message||err}`).finally(()=>button.disabled=false)}
+    });
+    document.getElementById('registry-detail-close').addEventListener('click',()=>{if(typeof registryDialog.close==='function')registryDialog.close();else registryDialog.removeAttribute('open')});
+    load().catch(err=>{table.innerHTML=`<div class="empty bad-text">${escapeCell(err.message)}</div>`;statusEl.textContent='扫描失败'});
+  </script>
+</body>
+</html>

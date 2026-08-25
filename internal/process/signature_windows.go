@@ -137,18 +137,19 @@ func CheckSignature(path string) SignatureResult {
 		catalogMsg = fmt.Sprintf("; Catalog 返回 0x%08X", catalogCode)
 	}
 
-	if systemPath {
-		return SignatureResult{
-			Status:  "系统文件",
-			Message: "位于 Windows 系统目录；嵌入签名未验证: " + embeddedMsg + catalogMsg,
-		}
-	}
-
 	if isNoSignatureCode(embeddedCode) && (catalogCode == 0 || isNoSignatureCode(catalogCode) || errors.Is(catalogErr, errCatalogNotFound)) {
-		return SignatureResult{Status: "无签名请注意!!!", Message: "未发现可信嵌入签名或 Catalog 签名"}
+		message := "未发现可信嵌入签名或 Catalog 签名"
+		if systemPath {
+			message = "文件位于 Windows 目录，但" + message + "；目录位置不能证明文件可信"
+		}
+		return SignatureResult{Status: "无签名请注意!!!", Message: message}
 	}
 
-	return SignatureResult{Status: "签名异常", Message: "嵌入签名: " + embeddedMsg + catalogMsg}
+	message := "嵌入签名: " + embeddedMsg + catalogMsg
+	if systemPath {
+		message = "文件位于 Windows 目录，但签名验证失败；" + message
+	}
+	return SignatureResult{Status: "签名异常", Message: message}
 }
 
 func verifyEmbeddedSignature(path string) (uint32, string) {

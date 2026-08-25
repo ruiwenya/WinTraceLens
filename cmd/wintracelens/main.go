@@ -4,19 +4,19 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"net"
 	"net/http"
 	"os/exec"
 	"runtime"
 	"time"
 
+	"github.com/ruiwenya/WinTraceLens/internal/loopback"
 	"github.com/ruiwenya/WinTraceLens/internal/server"
 )
 
 var version = "2.0.0-preview"
 
 func main() {
-	addr := flag.String("addr", "127.0.0.1:8787", "HTTP listen address")
+	addr := flag.String("addr", loopback.AutomaticAddress, "HTTP listen address (port 0 selects an available port)")
 	hashLimitMB := flag.Int64("hash-limit-mb", 512, "skip MD5 hashing for executable files larger than this size")
 	noBrowser := flag.Bool("no-browser", false, "do not open the web UI automatically")
 	showVersion := flag.Bool("version", false, "print version and exit")
@@ -32,12 +32,12 @@ func main() {
 		Version:        version,
 	})
 
-	url := srv.BootstrapURL(fmt.Sprintf("http://%s", *addr))
-	listener, err := net.Listen("tcp", *addr)
+	listener, err := loopback.Listen(*addr)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("cannot start the local interface service on %s: %v", *addr, err)
 	}
 	defer listener.Close()
+	url := srv.BootstrapURL(fmt.Sprintf("http://%s", listener.Addr().String()))
 
 	fmt.Printf("WinTraceLens %s is running: %s\n", version, url)
 	fmt.Println("For event log and security-log coverage, run this program as Administrator.")

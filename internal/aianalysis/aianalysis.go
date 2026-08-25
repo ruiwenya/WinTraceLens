@@ -20,6 +20,7 @@ import (
 	"github.com/ruiwenya/WinTraceLens/internal/loghealth"
 	"github.com/ruiwenya/WinTraceLens/internal/memoryscan"
 	"github.com/ruiwenya/WinTraceLens/internal/process"
+	"github.com/ruiwenya/WinTraceLens/internal/registryanomaly"
 	"github.com/ruiwenya/WinTraceLens/internal/securitylog"
 	"github.com/ruiwenya/WinTraceLens/internal/threatanalysis"
 )
@@ -33,6 +34,7 @@ const (
 	sectionMemory    = "memory"
 	sectionHost      = "host"
 	sectionFileTrace = "filetrace"
+	sectionRegistry  = "registry"
 	sectionHistory   = "history"
 	sectionSecurity  = "security"
 	sectionLogHealth = "loghealth"
@@ -59,6 +61,7 @@ type EvidenceProvider interface {
 	Drivers(driveranalysis.Options, bool) (driveranalysis.Snapshot, error)
 	Memory(memoryscan.Options, bool) (memoryscan.Snapshot, error)
 	LogHealth(bool) (loghealth.Snapshot, error)
+	Registry(registryanomaly.Options, bool) (registryanomaly.Snapshot, error)
 }
 
 type AnalyzeRequest struct {
@@ -445,6 +448,7 @@ func normalizeSections(values []string) []string {
 		sectionMemory:    {},
 		sectionHost:      {},
 		sectionFileTrace: {},
+		sectionRegistry:  {},
 		sectionHistory:   {},
 		sectionSecurity:  {},
 		sectionCase:      {},
@@ -616,6 +620,8 @@ func collectSection(section string, maxItems int, opts Options) evidenceSection 
 		return collectHost(maxItems, opts)
 	case sectionFileTrace:
 		return collectFileTrace(maxItems, opts)
+	case sectionRegistry:
+		return collectRegistry(maxItems, opts)
 	case sectionHistory:
 		return collectHistory(maxItems, opts)
 	case sectionSecurity:
@@ -682,7 +688,7 @@ func collectProcesses(maxItems int, opts Options) evidenceSection {
 		Key:              sectionProcesses,
 		Label:            "进程信息",
 		Count:            len(items),
-		Note:             fmt.Sprintf("按连接数、签名、路径和错误信息排序后截取；实时连接 %d 条，连接明细为当前快照，不代表历史通信；Toolhelp32 与 NT 系统信息仅用于发现用户态视图差异，不能证明不存在 DKOM 隐藏进程", len(connections)),
+		Note:             fmt.Sprintf("按连接数、签名、路径和错误信息排序后截取；包含命令行、账户/SID、会话、完整性、位数、保护状态、线程/句柄和内存上下文；实时连接 %d 条，连接明细为当前快照，不代表历史通信；Toolhelp32、NT 系统信息与 WMI 是用户态交叉视图，不能证明不存在 DKOM 隐藏进程", len(connections)),
 		CollectionErrors: collectionErrors,
 		Items: map[string]any{
 			"processes":       limitedProcesses,
@@ -715,11 +721,27 @@ func collectFindings(maxItems int, opts Options) evidenceSection {
 		return sectionError(sectionFindings, "关注项", err)
 	}
 	items := analysis.BuildFindings(processes, hostSnapshot)
+	collectionErrors := []string(nil)
+	registryOpts := registryanomaly.Options{MaxRecords: maxItems, MaxKeys: 6000, MaxValues: 30000, MaxDepth: 5, MaxDataSize: 4 * 1024 * 1024, Timeout: 10 * time.Second}
+	var registrySnapshot registryanomaly.Snapshot
+	if opts.Evidence != nil {
+		registrySnapshot, err = opts.Evidence.Registry(registryOpts, false)
+	} else {
+		registrySnapshot, err = registryanomaly.Collect(registryOpts)
+	}
+	if err != nil {
+		collectionErrors = append(collectionErrors, "注册表异常采集失败: "+err.Error())
+	} else {
+		registrySnapshot = registryanomaly.Correlate(registrySnapshot, processes, hostSnapshot)
+		items = append(items, analysis.RegistryFindings(registrySnapshot)...)
+		collectionErrors = append(collectionErrors, registrySnapshot.CollectionErrors...)
+	}
 	return evidenceSection{
-		Key:   sectionFindings,
-		Label: "关注项",
-		Count: len(items),
-		Items: limitSlice(items, maxItems),
+		Key:              sectionFindings,
+		Label:            "关注项",
+		Count:            len(items),
+		CollectionErrors: collectionErrors,
+		Items:            limitSlice(items, maxItems),
 	}
 }
 
@@ -836,22 +858,24 @@ func collectHost(maxItems int, opts Options) evidenceSection {
 	}
 	body := map[string]any{
 		"counts": map[string]int{
-			"services":       len(snapshot.Services),
-			"scheduledTasks": len(snapshot.ScheduledTasks),
-			"startupItems":   len(snapshot.StartupItems),
-			"users":          len(snapshot.Users),
-			"imageHijacks":   len(snapshot.ImageHijacks),
+			"services":         len(snapshot.Services),
+			"scheduledTasks":   len(snapshot.ScheduledTasks),
+			"startupItems":     len(snapshot.StartupItems),
+			"users":            len(snapshot.Users),
+			"imageHijacks":     len(snapshot.ImageHijacks),
+			"wmiSubscriptions": len(snapshot.WMISubscriptions),
 		},
 		"suspiciousServices":       suspiciousServices(snapshot.Services, maxItems),
 		"suspiciousScheduledTasks": suspiciousTasks(snapshot.ScheduledTasks, maxItems),
 		"startupItems":             limitSlice(snapshot.StartupItems, maxItems),
 		"notableUsers":             notableUsers(snapshot.Users),
 		"imageHijacks":             limitSlice(snapshot.ImageHijacks, maxItems),
+		"wmiSubscriptions":         limitSlice(snapshot.WMISubscriptions, maxItems),
 	}
 	return evidenceSection{
 		Key:              sectionHost,
 		Label:            "主机信息",
-		Count:            len(snapshot.Services) + len(snapshot.ScheduledTasks) + len(snapshot.StartupItems) + len(snapshot.Users) + len(snapshot.ImageHijacks),
+		Count:            len(snapshot.Services) + len(snapshot.ScheduledTasks) + len(snapshot.StartupItems) + len(snapshot.Users) + len(snapshot.ImageHijacks) + len(snapshot.WMISubscriptions),
 		CollectionErrors: snapshot.CollectionErrors,
 		Items:            body,
 	}
@@ -882,6 +906,47 @@ func collectFileTrace(maxItems int, opts Options) evidenceSection {
 		Note:             "最近 7 天，优先保留可疑文件",
 		CollectionErrors: snapshot.CollectionErrors,
 		Items:            limitSlice(snapshot.Records, maxItems),
+	}
+}
+
+func collectRegistry(maxItems int, opts Options) evidenceSection {
+	registryOpts := registryanomaly.Options{
+		MaxRecords: maxItems, MaxKeys: 6000, MaxValues: 30000, MaxDepth: 5,
+		MaxDataSize: 4 * 1024 * 1024, Timeout: 10 * time.Second,
+	}
+	var snapshot registryanomaly.Snapshot
+	var err error
+	if opts.Evidence != nil {
+		snapshot, err = opts.Evidence.Registry(registryOpts, false)
+	} else {
+		snapshot, err = registryanomaly.Collect(registryOpts)
+	}
+	if err != nil {
+		return sectionError(sectionRegistry, "注册表异常", err)
+	}
+	collectionErrors := append([]string(nil), snapshot.CollectionErrors...)
+	var processes []process.Info
+	var machine host.Snapshot
+	if opts.Evidence != nil {
+		processes, err = opts.Evidence.Processes(process.Options{SkipHashes: true, SkipSignatures: true}, false)
+		if err == nil {
+			machine, err = opts.Evidence.Host(host.Options{HashLimitBytes: opts.HashLimitBytes}, false)
+		}
+	} else {
+		processes, err = process.Collect(process.Options{SkipHashes: true, SkipSignatures: true})
+		if err == nil {
+			machine, err = host.Collect(host.Options{HashLimitBytes: opts.HashLimitBytes})
+		}
+	}
+	if err != nil {
+		collectionErrors = append(collectionErrors, "注册表关联证据采集失败: "+err.Error())
+	} else {
+		snapshot = registryanomaly.Correlate(snapshot, processes, machine)
+	}
+	return evidenceSection{
+		Key: sectionRegistry, Label: "注册表异常", Count: len(snapshot.Records),
+		Note:             "仅发送受控高价值位置中命中多信号异常评分的注册表值；二进制数据只包含哈希、长度和有限预览，不发送完整原始值",
+		CollectionErrors: collectionErrors, Items: limitSlice(snapshot.Records, maxItems),
 	}
 }
 
@@ -973,6 +1038,7 @@ func collectInvestigation(maxItems int, opts Options) evidenceSection {
 		sources.Security, sources.SecurityError = opts.Evidence.Security(securitylog.Options{MaxRecords: maxItems, StartTime: caseOpts.StartTime, EndTime: caseOpts.EndTime}, false)
 		sources.Drivers, sources.DriverError = opts.Evidence.Drivers(driveranalysis.Options{HashLimitBytes: opts.HashLimitBytes, MaxRecords: maxItems}, false)
 		sources.Connections, sources.ConnectionError = opts.Evidence.Connections(false)
+		sources.Registry, sources.RegistryError = opts.Evidence.Registry(registryanomaly.Options{MaxRecords: maxItems, MaxKeys: 6000, MaxValues: 30000, MaxDepth: 5, MaxDataSize: 4 * 1024 * 1024, Timeout: 10 * time.Second}, false)
 		snapshot = investigation.Build(caseOpts, sources)
 	}
 	return evidenceSection{

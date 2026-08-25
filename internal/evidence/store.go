@@ -13,6 +13,7 @@ import (
 	"github.com/ruiwenya/WinTraceLens/internal/loghealth"
 	"github.com/ruiwenya/WinTraceLens/internal/memoryscan"
 	"github.com/ruiwenya/WinTraceLens/internal/process"
+	"github.com/ruiwenya/WinTraceLens/internal/registryanomaly"
 	"github.com/ruiwenya/WinTraceLens/internal/securitylog"
 )
 
@@ -26,6 +27,8 @@ const (
 	driverTTL     = 2 * time.Minute
 	memoryTTL     = 30 * time.Second
 	logHealthTTL  = time.Minute
+	registryTTL   = 2 * time.Minute
+	nativeFileTTL = 2 * time.Minute
 )
 
 type cacheEntry[T any] struct {
@@ -70,6 +73,8 @@ type Store struct {
 	drivers     cache[driveranalysis.Snapshot]
 	memory      cache[memoryscan.Snapshot]
 	logHealth   cache[loghealth.Snapshot]
+	registry    cache[registryanomaly.Snapshot]
+	nativeFiles cache[filetrace.Snapshot]
 }
 
 func NewStore() *Store {
@@ -134,6 +139,18 @@ func (s *Store) LogHealth(force bool) (loghealth.Snapshot, error) {
 	return s.logHealth.get("all", force, logHealthTTL, loghealth.Collect, cloneLogHealth)
 }
 
+func (s *Store) Registry(opts registryanomaly.Options, force bool) (registryanomaly.Snapshot, error) {
+	return s.registry.get(cacheKey(opts), force, registryTTL, func() (registryanomaly.Snapshot, error) {
+		return registryanomaly.Collect(opts)
+	}, cloneRegistry)
+}
+
+func (s *Store) NativeFiles(opts filetrace.Options, force bool) (filetrace.Snapshot, error) {
+	return s.nativeFiles.get(cacheKey(opts), force, nativeFileTTL, func() (filetrace.Snapshot, error) {
+		return filetrace.CollectNative(opts)
+	}, cloneFileTrace)
+}
+
 func cacheKey(value any) string {
 	encoded, err := json.Marshal(value)
 	if err != nil {
@@ -152,10 +169,19 @@ func cloneConnections(value []process.ConnectionInfo) []process.ConnectionInfo {
 
 func cloneHost(value host.Snapshot) host.Snapshot {
 	value.Services = append([]host.ServiceInfo(nil), value.Services...)
+	for i := range value.Services {
+		value.Services[i].RiskReasons = append([]string(nil), value.Services[i].RiskReasons...)
+	}
 	value.ScheduledTasks = append([]host.ScheduledTaskInfo(nil), value.ScheduledTasks...)
 	value.StartupItems = append([]host.StartupItem(nil), value.StartupItems...)
 	value.Users = append([]host.UserInfo(nil), value.Users...)
 	value.ImageHijacks = append([]host.ImageHijackInfo(nil), value.ImageHijacks...)
+	value.WMISubscriptions = append([]host.WMISubscription(nil), value.WMISubscriptions...)
+	for i := range value.WMISubscriptions {
+		value.WMISubscriptions[i].RiskReasons = append([]string(nil), value.WMISubscriptions[i].RiskReasons...)
+		value.WMISubscriptions[i].RelatedServices = append([]string(nil), value.WMISubscriptions[i].RelatedServices...)
+		value.WMISubscriptions[i].RelatedTasks = append([]string(nil), value.WMISubscriptions[i].RelatedTasks...)
+	}
 	value.CollectionErrors = append([]string(nil), value.CollectionErrors...)
 	return value
 }
@@ -190,11 +216,24 @@ func cloneDrivers(value driveranalysis.Snapshot) driveranalysis.Snapshot {
 
 func cloneMemory(value memoryscan.Snapshot) memoryscan.Snapshot {
 	value.Records = append([]memoryscan.Record(nil), value.Records...)
+	for i := range value.Records {
+		value.Records[i].HardSignals = append([]string(nil), value.Records[i].HardSignals...)
+	}
 	value.CollectionErrors = append([]string(nil), value.CollectionErrors...)
 	return value
 }
 
 func cloneLogHealth(value loghealth.Snapshot) loghealth.Snapshot {
 	value.Sources = append([]loghealth.SourceHealth(nil), value.Sources...)
+	return value
+}
+
+func cloneRegistry(value registryanomaly.Snapshot) registryanomaly.Snapshot {
+	value.Records = append([]registryanomaly.Record(nil), value.Records...)
+	for i := range value.Records {
+		value.Records[i].Reasons = append([]string(nil), value.Records[i].Reasons...)
+		value.Records[i].Associations = append([]string(nil), value.Records[i].Associations...)
+	}
+	value.CollectionErrors = append([]string(nil), value.CollectionErrors...)
 	return value
 }

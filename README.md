@@ -18,8 +18,9 @@ WinTraceLens 是一款面向 Windows 应急响应和主机安全排查的本地�
 
 ### 主机信息
 
-- 汇总 Windows 服务、计划任务、启动项、本地用户和 IFEO 镜像劫持项。
+- 汇总 Windows 服务、计划任务、启动项、本地用户、IFEO 镜像劫持项和 WMI 永久事件订阅。
 - 展示路径、命令、账户、状态、MD5 和签名信息，便于定位持久化入口。
+- 通过原生 COM 枚举 `root\subscription` 中的过滤器、消费者和绑定关系，保留孤立对象，并对精确定时触发、8.3 短路径、用户可写路径、SID 不一致及脚本代理执行等组合信号评分。
 - 提供服务管理器、任务计划程序、系统配置启动项、本地用户和组、注册表编辑器快捷入口，方便与系统原生界面交叉核对。
 - 支持正则筛选和分表 CSV 导出。
 
@@ -54,6 +55,7 @@ WinTraceLens 是一款面向 Windows 应急响应和主机安全排查的本地�
 - 原生解析本机或离线 Amcache Hive，展示 SHA1、Publisher、产品、BinaryType、ProgramId 关联、PE 链接时间和记录时间。
 - Amcache 被占用时可在管理员模式下使用临时 VSS 快照读取，并在完成后清理快照。
 - 补充 Prefetch、Recent LNK、JumpList、Shimcache、PCA、UserAssist、PowerShell PSReadLine 和 SRUM 证据。
+- 在受控落地点内检查 `desktop.ini` 结构异常，包括零字节文件、异常体积、INI 结构破坏和 ShellClassInfo 后的长尾 UTF-16 空白编码；该检查不受“最近修改”时间窗口限制。
 - 每个取证源都显示可用性和采集提示，避免把系统未启用、权限不足或记录不存在误认为程序故障。
 - 所有主要列支持表头升降序排序，并提供取证源筛选、正则搜索和 CSV 导出。
 
@@ -118,11 +120,15 @@ GUI 版本需要 Microsoft Edge WebView2 Runtime。建议在 Windows 10、Window
 CLI 示例：
 
 ```powershell
+WinTraceLens-cli.exe
+WinTraceLens-cli.exe -no-browser
+# 仅在确实需要固定端口时指定：
 WinTraceLens-cli.exe -addr 127.0.0.1:8787
-WinTraceLens-cli.exe -addr 127.0.0.1:8787 -no-browser
 ```
 
-本地服务默认仅监听回环地址，并使用启动随机令牌、会话 Cookie、API 请求头和同源检查限制访问。不要将 `-addr` 改为对外网卡地址，除非已经在隔离环境中增加了额外访问控制。
+GUI 和 CLI 默认监听 `127.0.0.1:0`，由 Windows 分配当前可用端口，不依赖固定的 `8787`。本地服务使用启动随机令牌、会话 Cookie、API 请求头和同源检查限制访问。不要将 `-addr` 改为对外网卡地址，除非已经在隔离环境中增加了额外访问控制。
+
+如果旧机器仍提示 `8787` 无法启动，通常说明运行的是旧版 EXE、CLI 旧构建，或快捷方式附加了 `-addr 127.0.0.1:8787`。可用 `netstat -ano | findstr :8787` 核对占用，但最新默认构建不需要该端口。
 
 ### 老系统版本
 
@@ -150,6 +156,26 @@ go build -trimpath -ldflags "-H windowsgui -s -w" -o dist\WinTraceLens.exe .\cmd
 go build -trimpath -ldflags "-s -w" -o dist\WinTraceLens-cli.exe .\cmd\wintracelens
 ```
 
+也可使用统一构建脚本：
+
+```powershell
+.\scripts\build-release.ps1 -Version 2.0.0-preview
+```
+
+### 发布签名与 Smart App Control
+
+公开发布的 `WinTraceLens.exe` 和 `WinTraceLens-cli.exe` 应使用同一个受信任发布者的 Authenticode 代码签名证书签名，并添加 SHA-256 RFC 3161 时间戳。自签名证书不能解决普通 Windows 11 终端上的 Smart App Control 信任问题。
+
+使用证书存储中的发布证书构建并签名：
+
+```powershell
+.\scripts\build-release.ps1 `
+  -Version 2.0.0-preview `
+  -SignToolPath "C:\Program Files (x86)\Windows Kits\10\bin\<SDK版本>\x64\signtool.exe" `
+  -CertificateThumbprint "<代码签名证书指纹>"
+```
+
+签名必须是构建流程的最后一步；签名后不要再压缩修改 EXE、写入资源或补丁。每次 Release 同时发布脚本生成的 `SHA256SUMS.txt`。若 Microsoft Defender 将文件明确判定为恶意软件或 PUA，而不是仅由 Smart App Control 阻止未知应用，应向 Microsoft 提交该版本进行误报复核，不应要求用户长期关闭 Defender。
 可选测试：
 
 ```powershell

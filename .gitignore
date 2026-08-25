@@ -1,7 +1,10 @@
 /bin/
+/build/
 /dist/
 /verification-csv/
 /verification-*.png
+/.gocache/
+/.gotmp/
 *.test.exe
 *.log
 *.key
