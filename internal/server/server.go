@@ -16,6 +16,7 @@ import (
 
 	"github.com/ruiwenya/WinTraceLens/internal/aianalysis"
 	"github.com/ruiwenya/WinTraceLens/internal/analysis"
+	"github.com/ruiwenya/WinTraceLens/internal/csvutil"
 	"github.com/ruiwenya/WinTraceLens/internal/dialog"
 	"github.com/ruiwenya/WinTraceLens/internal/driveranalysis"
 	"github.com/ruiwenya/WinTraceLens/internal/evidence"
@@ -43,6 +44,8 @@ type Options struct {
 type Server struct {
 	options            Options
 	accessToken        string
+	evidenceExportMu   sync.Mutex
+	evidenceCollectMu  sync.Mutex
 	aiSessionMu        sync.Mutex
 	aiSession          aianalysis.SessionState
 	aiPreviews         map[string]aiPreviewEntry
@@ -68,6 +71,9 @@ func New(options Options) *Server {
 
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/api/export/evidence", s.handleEvidencePackage)
+	mux.HandleFunc("/api/export/evidence/status", s.handleEvidenceStatus)
+	mux.HandleFunc("/api/export/evidence/collect", s.handleEvidenceCollect)
 	mux.HandleFunc("/api/processes", s.handleProcesses)
 	mux.HandleFunc("/api/processes.csv", s.handleProcessesCSV)
 	mux.HandleFunc("/api/process/", s.handleProcessAction)
@@ -797,6 +803,9 @@ func (s *Server) handleYARAScan(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		resp.Errors = append(resp.Errors, "进程列表采集失败，文件命中将无法关联进程: "+err.Error())
 	}
+	scanScope := req
+	scanScope.Rules = ""
+	s.rememberEvidence("yara", scanScope, resp)
 	writeJSON(w, resp)
 }
 
@@ -1035,6 +1044,7 @@ func (s *Server) collectFindings(force bool) ([]analysis.Finding, string, error)
 		registrySnapshot = registryanomaly.Correlate(registrySnapshot, processes, hostSnapshot)
 		findings = append(findings, analysis.RegistryFindings(registrySnapshot)...)
 	}
+	s.rememberEvidence("findings", nil, map[string]any{"items": findings, "hostSummary": summary})
 	return findings, summary, nil
 }
 
@@ -1069,7 +1079,9 @@ func (s *Server) threatBehaviorSnapshot(opts threatanalysis.Options, force bool)
 			sources.CollectionErrors = append(sources.CollectionErrors, sources.FileTrace.CollectionErrors...)
 		}
 	}
-	return threatanalysis.Build(opts, sources), nil
+	snapshot := threatanalysis.Build(opts, sources)
+	s.rememberEvidence("behavior", opts, snapshot)
+	return snapshot, nil
 }
 
 func (s *Server) handleProcessAction(w http.ResponseWriter, r *http.Request) {
@@ -1207,9 +1219,7 @@ func (s *Server) handleProcessesCSV(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleModules(w http.ResponseWriter, pid uint32) {
-	items, err := process.Modules(pid, process.Options{
-		HashLimitBytes: s.options.HashLimitBytes,
-	})
+	items, err := s.collectModuleEvidence(pid)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1225,9 +1235,7 @@ func (s *Server) handleModules(w http.ResponseWriter, pid uint32) {
 }
 
 func (s *Server) handleModulesCSV(w http.ResponseWriter, pid uint32) {
-	items, err := process.Modules(pid, process.Options{
-		HashLimitBytes: s.options.HashLimitBytes,
-	})
+	items, err := s.collectModuleEvidence(pid)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1335,15 +1343,7 @@ func writeCSV(w http.ResponseWriter, name string, header []string, rows [][]stri
 }
 
 func sanitizeCSVRow(row []string) []string {
-	out := make([]string, len(row))
-	for i, value := range row {
-		value = strings.Join(strings.Fields(strings.ReplaceAll(value, "\x00", "")), " ")
-		if value != "" && strings.ContainsRune("=+-@", rune(value[0])) {
-			value = "'" + value
-		}
-		out[i] = value
-	}
-	return out
+	return csvutil.SanitizeRow(row)
 }
 
 func filterFindings(items []analysis.Finding, q string) []analysis.Finding {

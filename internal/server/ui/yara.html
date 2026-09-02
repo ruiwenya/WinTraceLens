@@ -883,7 +883,7 @@
           }, processScanController.signal);
           done += batch.length;
           mergeResults(data, true);
-          summaryEl.insertAdjacentHTML('beforeend', ` <span class="badge info">进度 ${done} / ${selected.length}</span>`);
+          summaryEl.insertAdjacentHTML('beforeend', ` <span class="badge info">进度 ${done} / ${selected.length} <small>${Math.round(done * 100 / selected.length)}%</small></span>`);
           if (!data.valid) break;
         }
         if (processScanStopped) {

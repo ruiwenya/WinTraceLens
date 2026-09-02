@@ -85,7 +85,9 @@ func (s *Server) investigationSnapshot(r *http.Request) (investigation.Snapshot,
 	defer s.investigationMu.Unlock()
 	if !force {
 		if cached, ok := s.investigationCache[key]; ok && time.Now().Before(cached.expiresAt) {
-			return investigation.ApplyScenario(cached.snapshot, scenario), nil
+			snapshot := investigation.ApplyScenario(cached.snapshot, scenario)
+			s.rememberEvidence("investigation", map[string]string{"range": key, "scenario": scenario}, snapshot)
+			return snapshot, nil
 		}
 	}
 
@@ -146,7 +148,9 @@ func (s *Server) investigationSnapshot(r *http.Request) (investigation.Snapshot,
 	s.investigationCache = map[string]investigationCacheEntry{
 		key: {snapshot: snapshot, expiresAt: time.Now().Add(2 * time.Minute)},
 	}
-	return investigation.ApplyScenario(snapshot, scenario), nil
+	snapshot = investigation.ApplyScenario(snapshot, scenario)
+	s.rememberEvidence("investigation", map[string]string{"range": key, "scenario": scenario}, snapshot)
+	return snapshot, nil
 }
 
 func investigationMaxFromQuery(r *http.Request) int {

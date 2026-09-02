@@ -109,7 +109,9 @@ func (s *Server) registrySnapshot(opts registryanomaly.Options, force bool) (reg
 	if hostErr != nil {
 		snapshot.CollectionErrors = append(snapshot.CollectionErrors, "主机信息关联: "+hostErr.Error())
 	}
-	return registryanomaly.Correlate(snapshot, processes, machine), nil
+	snapshot = registryanomaly.Correlate(snapshot, processes, machine)
+	s.rememberEvidence("registry-correlated", opts, snapshot)
+	return snapshot, nil
 }
 
 func registryOptionsFromRequest(r *http.Request) registryanomaly.Options {

@@ -32,38 +32,48 @@ const (
 )
 
 type cacheEntry[T any] struct {
-	value     T
-	expiresAt time.Time
+	value       T
+	expiresAt   time.Time
+	collectedAt time.Time
 }
 
 type cache[T any] struct {
-	mu     sync.Mutex
-	values map[string]cacheEntry[T]
+	mu        sync.Mutex
+	collectMu sync.Mutex
+	values    map[string]cacheEntry[T]
 }
 
 func (c *cache[T]) get(key string, force bool, ttl time.Duration, collect func() (T, error), clone func(T) T) (T, error) {
+	c.collectMu.Lock()
+	defer c.collectMu.Unlock()
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	if c.values == nil {
 		c.values = make(map[string]cacheEntry[T])
 	}
 	if !force {
 		if entry, ok := c.values[key]; ok && time.Now().Before(entry.expiresAt) {
+			c.mu.Unlock()
 			return clone(entry.value), nil
 		}
 	}
+	c.mu.Unlock()
 	value, err := collect()
 	if err != nil {
 		var zero T
 		return zero, err
 	}
-	c.values[key] = cacheEntry[T]{value: clone(value), expiresAt: time.Now().Add(ttl)}
+	now := time.Now()
+	c.mu.Lock()
+	c.values[key] = cacheEntry[T]{value: clone(value), expiresAt: now.Add(ttl), collectedAt: now}
+	c.mu.Unlock()
 	return clone(value), nil
 }
 
 // Store is the shared collection boundary for HTTP pages, exports, case analysis,
 // behavior analysis and AI evidence. Cache keys include every collector option.
 type Store struct {
+	resultMu    sync.Mutex
+	results     map[string]Dataset
 	processes   cache[[]process.Info]
 	connections cache[[]process.ConnectionInfo]
 	host        cache[host.Snapshot]
