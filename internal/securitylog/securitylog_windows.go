@@ -439,7 +439,6 @@ $ordered = @($events | Sort-Object @{Expression={ if ($_.Time) { $_.Time } else 
 	if err := json.Unmarshal(data, &snapshot); err != nil {
 		return Snapshot{}, err
 	}
-	snapshot.Events = FilterCollectorEvents(snapshot.Events)
 	snapshot.CollectionErrors = localizeErrors(snapshot.CollectionErrors)
 	return snapshot, nil
 }

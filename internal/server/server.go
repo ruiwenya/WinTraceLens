@@ -1895,7 +1895,7 @@ func filterSecurityEvents(items []securitylog.Event, category, q string) []secur
 func securityCategoryMatches(item securitylog.Event, category string) bool {
 	switch strings.ToLower(strings.TrimSpace(category)) {
 	case "", "all":
-		return !securitylog.IsLowValuePowerShellEvent(item)
+		return !securitylog.IsWinTraceLensCollectorEvent(item) && !securitylog.IsLowValuePowerShellEvent(item)
 	case "logon":
 		switch item.Category {
 		case "登录", "登录失败", "注销", "特权登录", "工作站锁定", "工作站解锁":
@@ -1910,7 +1910,7 @@ func securityCategoryMatches(item securitylog.Event, category string) bool {
 	case "user":
 		return item.Category == "用户账户"
 	case "powershell":
-		return item.Category == "PowerShell日志"
+		return item.Category == "PowerShell日志" && !securitylog.IsWinTraceLensCollectorEvent(item) && !securitylog.IsLowValuePowerShellEvent(item)
 	case "sql":
 		return item.Category == "SQL Server日志"
 	default:

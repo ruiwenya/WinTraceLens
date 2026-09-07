@@ -18,7 +18,7 @@ const (
 	wtdChoiceFile            = 1
 	wtdChoiceCatalog         = 2
 	wtdStateActionIgnore     = 0
-	wtdCacheOnlyURLRetrieval = 0x00000010
+	wtdCacheOnlyURLRetrieval = 0x00001000
 	trustENoSignature        = 0x800B0100
 	trustESubjectFormUnknown = 0x800B0003
 	trustEProviderUnknown    = 0x800B0001

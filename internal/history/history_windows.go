@@ -4,6 +4,7 @@ package history
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,6 +30,7 @@ func Collect(opts Options) (Snapshot, error) {
 [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 $OutputEncoding = [Console]::OutputEncoding
 $max = %d
+$queryMax = $max + 1
 $startTimeRaw = %q
 $endTimeRaw = %q
 $startTime = if ([string]::IsNullOrWhiteSpace($startTimeRaw)) { $null } else { [datetime]::ParseExact($startTimeRaw, 'yyyy-MM-dd HH:mm:ss', [Globalization.CultureInfo]::InvariantCulture) }
@@ -133,21 +135,27 @@ function In-TimeRange($value) {
 }
 
 try {
-  Get-WinEvent -FilterHashtable (New-EventFilter 'Microsoft-Windows-Sysmon/Operational' @(3,22)) -MaxEvents $max -ErrorAction Stop | ForEach-Object {
+  Get-WinEvent -FilterHashtable (New-EventFilter 'Microsoft-Windows-Sysmon/Operational' @(3)) -MaxEvents $queryMax -ErrorAction Stop | ForEach-Object {
     $data = Get-EventDataMap $_
     $time = $_.TimeCreated.ToString('yyyy-MM-dd HH:mm:ss')
-    if ($_.Id -eq 3) {
-      Add-Record $time 'Sysmon' $_.Id $data['Image'] $data['ProcessId'] $data['Protocol'] (Join-Endpoint $data['SourceIp'] $data['SourcePort']) (Join-Endpoint $data['DestinationIp'] $data['DestinationPort']) '' $data['Initiated'] $data['User'] $data['DestinationHostname']
-    } elseif ($_.Id -eq 22) {
-      Add-Record $time 'Sysmon DNS' $_.Id $data['Image'] $data['ProcessId'] '' '' '' $data['QueryName'] '' $data['User'] $data['QueryResults']
-    }
+    Add-Record $time 'Sysmon' $_.Id $data['Image'] $data['ProcessId'] $data['Protocol'] (Join-Endpoint $data['SourceIp'] $data['SourcePort']) (Join-Endpoint $data['DestinationIp'] $data['DestinationPort']) '' $data['Initiated'] $data['User'] $data['DestinationHostname']
   }
 } catch {
   Add-Error 'Sysmon' $_.Exception.Message
 }
 
 try {
-  Get-WinEvent -FilterHashtable (New-EventFilter 'Microsoft-Windows-DNS-Client/Operational' $null) -MaxEvents $max -ErrorAction Stop | ForEach-Object {
+  Get-WinEvent -FilterHashtable (New-EventFilter 'Microsoft-Windows-Sysmon/Operational' @(22)) -MaxEvents $queryMax -ErrorAction Stop | ForEach-Object {
+    $data = Get-EventDataMap $_
+    $time = $_.TimeCreated.ToString('yyyy-MM-dd HH:mm:ss')
+    Add-Record $time 'Sysmon DNS' $_.Id $data['Image'] $data['ProcessId'] '' '' '' $data['QueryName'] '' $data['User'] $data['QueryResults']
+  }
+} catch {
+  Add-Error 'Sysmon DNS' $_.Exception.Message
+}
+
+try {
+  Get-WinEvent -FilterHashtable (New-EventFilter 'Microsoft-Windows-DNS-Client/Operational' $null) -MaxEvents $queryMax -ErrorAction Stop | ForEach-Object {
     $data = Get-EventDataMap $_
     $time = $_.TimeCreated.ToString('yyyy-MM-dd HH:mm:ss')
     $query = First-Value $data @('QueryName','QName','Name','HostName','Hostname','Query')
@@ -166,7 +174,7 @@ try {
 }
 
 try {
-  Get-WinEvent -FilterHashtable (New-EventFilter 'Security' @(5156,5157)) -MaxEvents $max -ErrorAction Stop | ForEach-Object {
+  Get-WinEvent -FilterHashtable (New-EventFilter 'Security' @(5156,5157)) -MaxEvents $queryMax -ErrorAction Stop | ForEach-Object {
     $data = Get-EventDataMap $_
     $time = $_.TimeCreated.ToString('yyyy-MM-dd HH:mm:ss')
     $action = if ($_.Id -eq 5156) { '允许' } else { '阻止' }
@@ -177,7 +185,7 @@ try {
 }
 
 try {
-  Get-DnsClientCache -ErrorAction Stop | Select-Object -First $max | ForEach-Object {
+  Get-DnsClientCache -ErrorAction Stop | Select-Object -First $queryMax | ForEach-Object {
     $data = @($_.Data | Where-Object { $_ }) -join '; '
     Add-Record '' 'DNS 缓存' '' '' '' '' '' '' $_.Entry '' '' $data
   }
@@ -190,7 +198,7 @@ try {
         $names += $Matches[2].Trim()
       }
     }
-    foreach ($name in @($names | Where-Object { $_ } | Select-Object -Unique -First $max)) {
+    foreach ($name in @($names | Where-Object { $_ } | Select-Object -Unique -First $queryMax)) {
       Add-Record '' 'DNS 缓存' '' '' '' '' '' '' $name '' '' 'ipconfig /displaydns'
     }
   } catch {
@@ -205,7 +213,7 @@ try {
     $fieldLine = @($allLines | Where-Object { $_ -like '#Fields:*' } | Select-Object -Last 1)
     if ($fieldLine.Count -gt 0) {
       $fields = ($fieldLine[0] -replace '^#Fields:\s*','') -split '\s+'
-      $dataLines = @($allLines | Where-Object { $_ -and -not $_.StartsWith('#') } | Select-Object -Last $max)
+      $dataLines = @($allLines | Where-Object { $_ -and -not $_.StartsWith('#') })
       foreach ($line in $dataLines) {
         $parts = $line -split '\s+'
         $row = @{}
@@ -224,7 +232,17 @@ try {
   Add-Error '防火墙日志' $_.Exception.Message
 }
 
-$ordered = @($records | Sort-Object @{Expression={ if ($_.Time) { $_.Time } else { '0000' } }; Descending=$true} | Select-Object -First $max)
+$ordered = New-Object 'System.Collections.Generic.List[object]'
+foreach ($group in @($records | Group-Object Source)) {
+  $sourceRows = @($group.Group | Sort-Object @{Expression={ if ($_.Time) { $_.Time } else { '0000' } }; Descending=$true})
+  if ($sourceRows.Count -gt $max) {
+    Add-Error $group.Name ('结果超过每来源上限 ' + $max + ' 条，已保留最新记录；请缩小时间范围继续核查。')
+  }
+  foreach ($row in @($sourceRows | Select-Object -First $max)) {
+    $ordered.Add($row) | Out-Null
+  }
+}
+$ordered = @($ordered | Sort-Object @{Expression={ if ($_.Time) { $_.Time } else { '0000' } }; Descending=$true})
 [pscustomobject]@{
   Records=$ordered
   CollectionErrors=@($errors)
@@ -232,11 +250,20 @@ $ordered = @($records | Sort-Object @{Expression={ if ($_.Time) { $_.Time } else
 } | ConvertTo-Json -Compress -Depth 5
 `, maxRecords, startRaw, endRaw)
 
-	cmd := winexec.PowerShell(script)
+	timeout := 2 * time.Minute
+	if maxRecords > 2000 {
+		timeout = 4 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := winexec.PowerShellContext(ctx, script)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return Snapshot{}, fmt.Errorf("历史通信采集超过 %s，已终止当前系统查询；请缩小时间范围或条数", timeout)
+		}
 		msg := strings.TrimSpace(stderr.String())
 		if msg == "" {
 			msg = err.Error()

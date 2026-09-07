@@ -196,14 +196,14 @@ func Build(opts Options, sources Sources) Snapshot {
 
 	for _, item := range registrySnapshot.Records {
 		path := strings.Trim(strings.TrimSpace(item.Hive+`\`+item.KeyPath), `\`)
-		details := join(strings.Join(item.Reasons, "；"), "值="+item.ValueName, "类型="+item.ValueType, "长度="+strconv.Itoa(item.DataLength), "关联="+strings.Join(item.Associations, "；"))
+		details := join(strings.Join(item.Reasons, "；"), "值="+item.ValueName, "类型="+item.ValueType, "长度="+strconv.Itoa(item.DataLength), "时间语义=所在注册表键最后修改（本机本地时间）", "关联="+strings.Join(item.Associations, "；"))
 		snapshot.addEntity(Entity{
 			Kind: "注册表值", Source: "注册表异常", Group: "注册表异常", Level: item.Level,
 			Name: item.ValueName, Value: item.StringsPreview, User: item.SID, Hash: item.SHA256, Path: path, Details: details,
 		})
 		snapshot.addTimeline(opts, TimelineEvent{
 			Time: item.LastWrite, Source: "注册表异常", Group: "注册表异常", Category: item.ValueType,
-			Level: item.Level, Action: "异常注册表值写入/更新", Entity: item.ValueName, User: item.SID,
+			Level: item.Level, Action: "异常值所在注册表键最后修改", Entity: item.ValueName, User: item.SID,
 			Path: path, Hash: item.SHA256, Details: details,
 		})
 	}

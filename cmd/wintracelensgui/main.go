@@ -21,7 +21,7 @@ import (
 	"github.com/ruiwenya/WinTraceLens/internal/server"
 )
 
-var version = "2.0.0-preview-gui"
+var version = "2.0.0-preview.3"
 
 func main() {
 	runtime.LockOSThread()

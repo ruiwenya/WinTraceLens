@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ruiwenya/WinTraceLens/internal/process"
 )
 
 func TestEvidencePlanIncludesDependenciesOnce(t *testing.T) {
@@ -35,10 +37,38 @@ func TestEvidencePlanIncludesDependenciesOnce(t *testing.T) {
 	if plan, err := evidenceCollectionPlan([]string{"connections"}); err != nil || !reflect.DeepEqual(plan, []string{"connections"}) {
 		t.Fatalf("unrelated collectors: %v %v", plan, err)
 	}
+	allPlan, err := evidenceCollectionPlan([]string{"process-modules", "connections", "host"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if indexOfStep(allPlan, "connections") > indexOfStep(allPlan, "process-modules") {
+		t.Fatalf("volatile connection snapshot should precede module sweep: %v", allPlan)
+	}
 	for _, sources := range [][]string{{}, {"yara"}, {"ai-session"}, {"native-files"}} {
 		if _, err := evidenceCollectionPlan(sources); err == nil {
 			t.Fatalf("unsafe/empty plan accepted %v", sources)
 		}
+	}
+}
+
+func indexOfStep(items []string, target string) int {
+	for index, item := range items {
+		if item == target {
+			return index
+		}
+	}
+	return -1
+}
+
+func TestPrioritizeModuleTargets(t *testing.T) {
+	items := []process.Info{
+		{PID: 100, Name: "signed.exe", Path: `C:\Program Files\Vendor\signed.exe`, Signature: "已签名"},
+		{PID: 200, Name: "drop.exe", Path: `C:\Users\Public\drop.exe`, Signature: "无签名请注意"},
+		{PID: 4, Name: "System", Signature: "系统文件"},
+	}
+	got := prioritizeModuleTargets(items)
+	if got[0].PID != 200 || got[1].PID != 4 || got[2].PID != 100 {
+		t.Fatalf("unexpected priority: %#v", got)
 	}
 }
 

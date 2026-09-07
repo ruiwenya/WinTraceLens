@@ -138,13 +138,13 @@ func selectProcessFamily(items []process.Info, pid uint32) (process.Info, *proce
 	}
 
 	var parent *process.Info
-	if item, ok := byPID[current.ParentPID]; ok {
+	if item, ok := byPID[current.ParentPID]; ok && validParentInstance(item, current) {
 		parent = &item
 	}
 
 	children := make([]process.Info, 0)
 	for _, item := range items {
-		if item.ParentPID == pid {
+		if item.ParentPID == pid && validParentInstance(current, item) {
 			children = append(children, item)
 		}
 	}
@@ -192,10 +192,19 @@ func relatedImageHijacks(items []host.ImageHijackInfo, proc process.Info) []host
 }
 
 func relatedHistoryRecords(items []history.Record, proc process.Info) []history.Record {
-	pid := strconv.FormatUint(uint64(proc.PID), 10)
 	out := make([]history.Record, 0)
 	for _, item := range items {
-		if strings.TrimSpace(item.PID) == pid || relatedToProcess(proc, item.Process, item.Details, item.User, item.Query) {
+		if !eventBelongsToProcessLifetime(proc, item.Time) {
+			continue
+		}
+		if strings.TrimSpace(item.PID) != "" {
+			pid, ok := parsePIDReference(item.PID)
+			if ok && pid == proc.PID {
+				out = append(out, item)
+			}
+			continue
+		}
+		if strictProcessReference(proc, item.Process) {
 			out = append(out, item)
 		}
 	}
@@ -203,14 +212,21 @@ func relatedHistoryRecords(items []history.Record, proc process.Info) []history.
 }
 
 func relatedSecurityEvents(items []securitylog.Event, proc process.Info) []securitylog.Event {
-	pid := strconv.FormatUint(uint64(proc.PID), 10)
 	out := make([]securitylog.Event, 0)
 	for _, item := range items {
 		if securitylog.IsWinTraceLensCollectorEvent(item) || securitylog.IsLowValuePowerShellEvent(item) {
 			continue
 		}
-		if strings.Contains(item.Process, pid) ||
-			relatedToProcess(proc, item.Process, item.Command, item.ServiceName, item.Message, item.Details) {
+		if !eventBelongsToProcessLifetime(proc, item.Time) {
+			continue
+		}
+		if pid, ok := parsePIDReference(item.Process); ok {
+			if pid == proc.PID {
+				out = append(out, item)
+			}
+			continue
+		}
+		if strictProcessReference(proc, item.Process) || strictProcessReference(proc, item.Command) {
 			out = append(out, item)
 		}
 	}
@@ -218,29 +234,154 @@ func relatedSecurityEvents(items []securitylog.Event, proc process.Info) []secur
 }
 
 func relatedToProcess(proc process.Info, values ...string) bool {
+	for _, value := range values {
+		if strictProcessReference(proc, value) {
+			return true
+		}
+	}
+	return false
+}
+
+func strictProcessReference(proc process.Info, value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
 	procPath := normalizeEvidence(proc.Path)
 	procName := strings.ToLower(strings.TrimSpace(proc.Name))
 	baseName := strings.ToLower(strings.TrimSpace(filepath.Base(proc.Path)))
 	if baseName == "." || baseName == string(filepath.Separator) {
 		baseName = ""
 	}
-	for _, value := range values {
-		value = strings.ToLower(strings.TrimSpace(value))
-		if value == "" {
-			continue
-		}
-		normalized := normalizeEvidence(value)
-		if procPath != "" && (normalized == procPath || strings.Contains(normalized, procPath) || strings.Contains(value, procPath)) {
-			return true
-		}
-		if procName != "" && strings.Contains(value, procName) {
-			return true
-		}
-		if baseName != "" && strings.Contains(value, baseName) {
+	lower := strings.ToLower(strings.TrimSpace(value))
+	if lower == procName || lower == baseName {
+		return procName != "" || baseName != ""
+	}
+	if procPath != "" {
+		if normalizeEvidence(value) == procPath || containsCommandPath(lower, procPath) {
 			return true
 		}
 	}
-	return false
+	candidate := commandExecutable(value)
+	if candidate == "" {
+		return false
+	}
+	if strings.ContainsAny(candidate, `\\/`) {
+		return procPath != "" && normalizeEvidence(candidate) == procPath
+	}
+	candidate = strings.ToLower(candidate)
+	return candidate == procName || candidate == baseName
+}
+
+func commandExecutable(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if value[0] == '"' {
+		if end := strings.Index(value[1:], `"`); end >= 0 {
+			return strings.TrimSpace(value[1 : end+1])
+		}
+	}
+	lower := strings.ToLower(value)
+	end := len(value)
+	found := false
+	for _, ext := range []string{".exe", ".com", ".bat", ".cmd", ".dll"} {
+		if index := strings.Index(lower, ext); index >= 0 && (!found || index+len(ext) < end) {
+			end = index + len(ext)
+			found = true
+		}
+	}
+	if found {
+		return strings.Trim(strings.TrimSpace(value[:end]), `"`)
+	}
+	if fields := strings.Fields(value); len(fields) > 0 {
+		return strings.Trim(fields[0], `"`)
+	}
+	return ""
+}
+
+func containsCommandPath(value, normalizedPath string) bool {
+	value = strings.ReplaceAll(strings.ToLower(value), "/", `\`)
+	normalizedPath = strings.ReplaceAll(normalizedPath, "/", `\`)
+	for start := 0; ; {
+		index := strings.Index(value[start:], normalizedPath)
+		if index < 0 {
+			return false
+		}
+		index += start
+		beforeOK := index == 0 || isCommandBoundary(value[index-1])
+		after := index + len(normalizedPath)
+		afterOK := after == len(value) || isCommandBoundary(value[after])
+		if beforeOK && afterOK {
+			return true
+		}
+		start = index + 1
+	}
+}
+
+func isCommandBoundary(value byte) bool {
+	return value == ' ' || value == '\t' || value == '"' || value == '\'' || value == ',' || value == ';' || value == '(' || value == ')'
+}
+
+func parsePIDReference(value string) (uint32, bool) {
+	value = strings.TrimSpace(value)
+	if pid, ok := parsePIDToken(value); ok {
+		return pid, true
+	}
+	lower := strings.ToLower(value)
+	for _, label := range []string{"process id", "processid", "pid"} {
+		index := strings.Index(lower, label)
+		if index < 0 {
+			continue
+		}
+		tail := strings.TrimLeft(lower[index+len(label):], " \t:=#")
+		end := 0
+		for end < len(tail) && (tail[end] >= '0' && tail[end] <= '9' || tail[end] >= 'a' && tail[end] <= 'f' || tail[end] == 'x') {
+			end++
+		}
+		if end > 0 {
+			return parsePIDToken(tail[:end])
+		}
+	}
+	return 0, false
+}
+
+func parsePIDToken(value string) (uint32, bool) {
+	value = strings.TrimSpace(value)
+	base := 10
+	if strings.HasPrefix(strings.ToLower(value), "0x") {
+		base = 16
+		value = value[2:]
+	}
+	parsed, err := strconv.ParseUint(value, base, 32)
+	return uint32(parsed), err == nil
+}
+
+func eventBelongsToProcessLifetime(proc process.Info, eventTime string) bool {
+	created, createdOK := parseProcessTime(proc.CreatedAt)
+	eventAt, eventOK := parseProcessTime(eventTime)
+	return !createdOK || !eventOK || !eventAt.Before(created.Add(-2*time.Second))
+}
+
+func validParentInstance(parent, child process.Info) bool {
+	parentCreated, parentOK := parseProcessTime(parent.CreatedAt)
+	if expected, expectedOK := parseProcessTime(child.ParentCreatedAt); parentOK && expectedOK {
+		delta := parentCreated.Sub(expected)
+		return delta >= -2*time.Second && delta <= 2*time.Second
+	}
+	childCreated, childOK := parseProcessTime(child.CreatedAt)
+	return !parentOK || !childOK || !parentCreated.After(childCreated.Add(2*time.Second))
+}
+
+func parseProcessTime(value string) (time.Time, bool) {
+	value = strings.TrimSpace(value)
+	for _, layout := range []string{"2006-01-02 15:04:05", time.RFC3339, time.RFC3339Nano} {
+		if parsed, err := time.ParseInLocation(layout, value, time.Local); err == nil {
+			return parsed, true
+		}
+	}
+	return time.Time{}, false
 }
 
 func normalizeEvidence(value string) string {

@@ -121,11 +121,7 @@ func (s *Store) History(opts history.Options, force bool) (history.Snapshot, err
 
 func (s *Store) Security(opts securitylog.Options, force bool) (securitylog.Snapshot, error) {
 	return s.security.get(cacheKey(opts), force, securityTTL, func() (securitylog.Snapshot, error) {
-		snapshot, err := securitylog.Collect(opts)
-		if err == nil {
-			snapshot.Events = securitylog.FilterPowerShellNoise(snapshot.Events)
-		}
-		return snapshot, err
+		return securitylog.Collect(opts)
 	}, cloneSecurity)
 }
 

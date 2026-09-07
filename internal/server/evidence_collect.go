@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/ruiwenya/WinTraceLens/internal/analysis"
@@ -80,6 +82,12 @@ var evidenceDependencies = map[string][]string{
 	"investigation":       {"processes", "connections", "host", "registry-correlated", "file-traces", "network-history", "security-events", "drivers"},
 }
 
+var evidenceCollectionPriority = []string{
+	"processes", "connections", "host", "registry", "registry-correlated",
+	"network-history", "security-events", "file-traces", "drivers", "memory",
+	"process-modules", "log-health", "findings", "behavior", "investigation",
+}
+
 func evidenceCollectionPlan(sources []string) ([]string, error) {
 	selected, err := evidencebundle.NormalizeSelection(sources)
 	if err != nil {
@@ -97,6 +105,15 @@ func evidenceCollectionPlan(sources []string) ([]string, error) {
 			visit(dependency)
 		}
 		plan = append(plan, id)
+	}
+	selectedSet := make(map[string]bool, len(selected))
+	for _, id := range selected {
+		selectedSet[id] = true
+	}
+	for _, id := range evidenceCollectionPriority {
+		if selectedSet[id] {
+			visit(id)
+		}
 	}
 	for _, id := range selected {
 		visit(id)
@@ -294,7 +311,7 @@ func (s *Server) evidenceSteps(req evidenceCollectRequest, plan []string) []evid
 					if sources.ProcessError != nil {
 						return nil, fmt.Errorf("进程采集失败：%w", sources.ProcessError)
 					}
-					items := sources.Processes
+					items := prioritizeModuleTargets(sources.Processes)
 					var warnings []string
 					attempted := 0
 					defer func() {
@@ -364,4 +381,46 @@ func (s *Server) evidenceSteps(req evidenceCollectRequest, plan []string) []evid
 		}})
 	}
 	return steps
+}
+
+func prioritizeModuleTargets(items []process.Info) []process.Info {
+	prioritized := append([]process.Info(nil), items...)
+	sort.SliceStable(prioritized, func(i, j int) bool {
+		left := moduleTargetScore(prioritized[i])
+		right := moduleTargetScore(prioritized[j])
+		if left != right {
+			return left > right
+		}
+		return prioritized[i].PID < prioritized[j].PID
+	})
+	return prioritized
+}
+
+func moduleTargetScore(item process.Info) int {
+	score := 0
+	if item.PID == 4 {
+		score += 100
+	}
+	signature := strings.ToLower(item.Signature + " " + item.SignatureMsg)
+	if strings.Contains(signature, "无签名") || strings.Contains(signature, "未签名") || strings.Contains(signature, "异常") || strings.Contains(signature, "invalid") {
+		score += 60
+	}
+	path := strings.ToLower(strings.ReplaceAll(item.Path, "/", `\`))
+	for _, marker := range []string{`\temp\`, `\appdata\`, `\programdata\`, `\users\public\`} {
+		if strings.Contains(path, marker) {
+			score += 45
+			break
+		}
+	}
+	if item.EnumerationWarning != "" || item.PathError != "" {
+		score += 30
+	}
+	if item.ConnectionCount > 0 {
+		connectionScore := item.ConnectionCount
+		if connectionScore > 20 {
+			connectionScore = 20
+		}
+		score += 10 + connectionScore
+	}
+	return score
 }
