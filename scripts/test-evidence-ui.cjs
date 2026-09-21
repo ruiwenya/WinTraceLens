@@ -1,6 +1,7 @@
 // Usage: node scripts/test-evidence-ui.cjs [absolute-path-to-playwright]
 // Runs the local CLI server, checks collection/export selection, and saves a
 // test evidence ZIP and screenshots under dist/evidence-ui-test (not published).
+// Set WTL_CLI to validate a candidate build without replacing the release CLI.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -8,9 +9,10 @@ const { spawn } = require('node:child_process');
 const { chromium } = require(process.argv[2] || 'playwright');
 
 const root = path.resolve(__dirname, '..');
-const output = path.join(root, 'dist', 'evidence-ui-test');
+const output = process.env.WTL_EVIDENCE_UI_OUTPUT || path.join(root, 'dist', 'evidence-ui-test');
 fs.mkdirSync(output, { recursive: true });
-const child = spawn(path.join(root, 'dist', 'WinTraceLens-cli.exe'), ['-no-browser', '-hash-limit-mb', '16'], {
+const cliPath = process.env.WTL_CLI || path.join(root, 'dist', 'WinTraceLens-cli.exe');
+const child = spawn(cliPath, ['-no-browser', '-hash-limit-mb', '16'], {
   cwd: root, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe']
 });
 let browser;
@@ -135,6 +137,7 @@ async function main() {
   releaseProgress();
   assert.equal(await page.evaluate(() => window.progressFixture), 503);
   await progressRouteFinished;
+  await page.waitForFunction(() => document.querySelector('.wtl-progress-percent').textContent === '未完成');
   assert.equal(await page.locator('.wtl-progress-percent').textContent(), '未完成');
 
   // Header coverage without triggering unrelated scans (including VSS/AI/YARA).
@@ -160,4 +163,7 @@ async function main() {
 main().catch(err => { console.error(err); process.exitCode = 1; }).finally(async () => {
   if (browser) await browser.close();
   child.kill();
+  child.stdout.destroy();
+  child.stderr.destroy();
+  child.unref();
 });

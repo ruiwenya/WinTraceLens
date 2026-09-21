@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "2.0.0-preview",
+    [string]$Version = "2.0.0-preview.5",
     [string]$OutputDirectory = "dist",
     [string]$SignToolPath = "",
     [string]$CertificateThumbprint = "",
@@ -15,6 +15,9 @@ $cliPath = Join-Path $outputPath "WinTraceLens-cli.exe"
 New-Item -ItemType Directory -Path $outputPath -Force | Out-Null
 Push-Location $repoRoot
 try {
+    & go generate .\cmd\wintracelensgui
+    if ($LASTEXITCODE -ne 0) { throw "GUI resource generation failed" }
+
     & go build -trimpath -ldflags "-H windowsgui -s -w -X main.version=$Version-gui" -o $guiPath .\cmd\wintracelensgui
     if ($LASTEXITCODE -ne 0) { throw "GUI build failed" }
 

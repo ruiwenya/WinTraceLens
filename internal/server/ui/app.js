@@ -102,7 +102,8 @@
       const next = { ...(init || {}) };
       next.headers = new Headers(next.headers || (typeof input !== 'string' ? input.headers : undefined));
       next.headers.set('X-WTL-Token', window.__WTL_API_TOKEN || '');
-      const tracked = resolved.pathname !== '/api/about' && !resolved.pathname.startsWith('/api/export/evidence');
+      const passiveMonitorPoll = resolved.pathname === '/api/network/monitor' && resolved.searchParams.get('watch') === '1';
+      const tracked = resolved.pathname !== '/api/about' && !resolved.pathname.startsWith('/api/export/evidence') && !passiveMonitorPoll;
       if (tracked) startProgress(resolved.pathname);
       try {
         const request = nativeFetch(input, next);

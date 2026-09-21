@@ -13,7 +13,7 @@ import (
 	"github.com/ruiwenya/WinTraceLens/internal/server"
 )
 
-var version = "2.0.0-preview.3"
+var version = "2.0.0-preview.5"
 
 func main() {
 	addr := flag.String("addr", loopback.AutomaticAddress, "HTTP listen address (port 0 selects an available port)")
@@ -31,6 +31,8 @@ func main() {
 		HashLimitBytes: *hashLimitMB * 1024 * 1024,
 		Version:        version,
 	})
+	srv.StartConnectionMonitor()
+	defer srv.Close()
 
 	listener, err := loopback.Listen(*addr)
 	if err != nil {

@@ -21,7 +21,7 @@ import (
 	"github.com/ruiwenya/WinTraceLens/internal/server"
 )
 
-var version = "2.0.0-preview.3"
+var version = "2.0.0-preview.5"
 
 func main() {
 	runtime.LockOSThread()
@@ -29,6 +29,7 @@ func main() {
 	addr := flag.String("addr", loopback.AutomaticAddress, "internal HTTP listen address")
 	hashLimitMB := flag.Int64("hash-limit-mb", 512, "skip MD5 hashing for executable files larger than this size")
 	debug := flag.Bool("debug-webview", false, "enable WebView2 dev tools and context menu")
+	systemFrame := flag.Bool("system-frame", false, "use the standard Windows title bar instead of the integrated frame")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 
@@ -50,6 +51,8 @@ func main() {
 		HashLimitBytes: *hashLimitMB * 1024 * 1024,
 		Version:        version,
 	})
+	appServer.StartConnectionMonitor()
+	defer appServer.Close()
 	srv := &http.Server{Handler: appServer.Routes()}
 
 	go func() {
@@ -67,6 +70,7 @@ func main() {
 			Title:  "WinTraceLens基础版",
 			Width:  1280,
 			Height: 820,
+			IconId: appIconResourceID,
 			Center: true,
 		},
 	})
@@ -75,6 +79,30 @@ func main() {
 		fatalGUI("WinTraceLens 启动失败", "无法加载 WebView2。请确认系统已安装 Microsoft Edge WebView2 Runtime。")
 	}
 	defer w.Destroy()
+
+	hwnd := uintptr(w.Window())
+	customFrame := false
+	if !*systemFrame {
+		customFrame = installCustomWindowFrame(hwnd)
+	}
+	applyWindowTheme(hwnd, systemWindowTheme())
+	shellToken, err := newWindowShellToken()
+	if err != nil {
+		_ = srv.Shutdown(context.Background())
+		fatalGUI("WinTraceLens 启动失败", fmt.Sprintf("无法初始化窗口安全令牌: %v", err))
+	}
+	if err := w.Bind("wtlWindowAction", func(token, action string) (string, error) {
+		return runWindowAction(hwnd, token, shellToken, action)
+	}); err != nil {
+		_ = srv.Shutdown(context.Background())
+		fatalGUI("WinTraceLens 启动失败", fmt.Sprintf("无法初始化窗口操作桥: %v", err))
+	}
+	shellScript, err := windowShellInitScript("http://"+listener.Addr().String(), shellToken, customFrame)
+	if err != nil {
+		_ = srv.Shutdown(context.Background())
+		fatalGUI("WinTraceLens 启动失败", fmt.Sprintf("无法初始化窗口外观: %v", err))
+	}
+	w.Init(shellScript)
 
 	w.Navigate(url)
 	w.Run()

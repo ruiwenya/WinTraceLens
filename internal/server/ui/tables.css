@@ -1,0 +1,186 @@
+:root {
+  --wtl-cell-y: 6px;
+  --wtl-cell-x: 10px;
+}
+
+:root[data-density="compact"] {
+  --wtl-cell-y: 4px;
+  --wtl-cell-x: 8px;
+}
+
+.wtl-table,
+.table-wrap > table,
+table.process-table,
+table.detail-table,
+table.source-table,
+table.summary-table,
+table.wmi-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--wtl-surface);
+  color: var(--wtl-text);
+  font-size: 13px;
+}
+
+.wtl-table thead th,
+.table-wrap > table thead th,
+table.process-table thead th,
+table.detail-table thead th,
+table.source-table thead th,
+table.summary-table thead th,
+table.wmi-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  height: 30px;
+  padding: 6px var(--wtl-cell-x);
+  border-bottom: 1px solid var(--wtl-border);
+  background: var(--wtl-chrome);
+  color: var(--wtl-text-strong);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.25;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.wtl-table tbody tr,
+.table-wrap > table tbody tr,
+table.process-table tbody tr,
+table.detail-table tbody tr,
+table.source-table tbody tr,
+table.summary-table tbody tr,
+table.wmi-table tbody tr {
+  --wtl-current-row-bg: var(--wtl-surface);
+}
+
+.wtl-table tbody tr.wtl-data-row:nth-child(even),
+.table-wrap > table tbody tr.wtl-data-row:nth-child(even),
+table.process-table tbody tr.wtl-data-row:nth-child(even),
+table.detail-table tbody tr.wtl-data-row:nth-child(even),
+table.source-table tbody tr.wtl-data-row:nth-child(even),
+table.summary-table tbody tr.wtl-data-row:nth-child(even),
+table.wmi-table tbody tr.wtl-data-row:nth-child(even) {
+  --wtl-current-row-bg: var(--wtl-row-alt);
+}
+
+.wtl-table tbody tr.wtl-data-row:hover,
+.table-wrap > table tbody tr.wtl-data-row:hover,
+table.process-table tbody tr.wtl-data-row:hover,
+table.detail-table tbody tr.wtl-data-row:hover,
+table.source-table tbody tr.wtl-data-row:hover,
+table.summary-table tbody tr.wtl-data-row:hover,
+table.wmi-table tbody tr.wtl-data-row:hover {
+  --wtl-current-row-bg: var(--wtl-row-hover);
+}
+
+.wtl-table tbody tr:is(.selected, .wtl-selected),
+.wtl-table tbody tr:is(.selected, .wtl-selected):hover,
+.table-wrap > table tbody tr:is(.selected, .wtl-selected),
+.table-wrap > table tbody tr:is(.selected, .wtl-selected):hover,
+table.process-table tbody tr:is(.selected, .wtl-selected),
+table.process-table tbody tr:is(.selected, .wtl-selected):hover {
+  --wtl-current-row-bg: var(--wtl-row-selected);
+}
+
+.wtl-table tbody td,
+.table-wrap > table tbody td,
+table.process-table tbody td,
+table.detail-table tbody td,
+table.source-table tbody td,
+table.summary-table tbody td,
+table.wmi-table tbody td {
+  padding: var(--wtl-cell-y) var(--wtl-cell-x);
+  border-bottom: 1px solid var(--wtl-divider);
+  background: var(--wtl-current-row-bg);
+  color: var(--wtl-text);
+  line-height: 1.35;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wtl-table tbody tr:is(.selected, .wtl-selected) td:first-child,
+.table-wrap > table tbody tr:is(.selected, .wtl-selected) td:first-child,
+table.process-table tbody tr:is(.selected, .wtl-selected) td:first-child {
+  box-shadow: inset 3px 0 0 var(--wtl-accent);
+}
+
+.wtl-table tbody tr.wtl-data-row:focus-within td:first-child,
+.table-wrap > table tbody tr.wtl-data-row:focus-within td:first-child {
+  box-shadow: inset 2px 0 0 var(--wtl-focus-border);
+}
+
+.wtl-table th.sortable,
+.table-wrap > table th.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.wtl-table th.sortable:hover,
+.table-wrap > table th.sortable:hover {
+  background: var(--wtl-row-hover);
+  color: var(--wtl-accent-strong);
+}
+
+.wtl-table .sort-head,
+.table-wrap > table .sort-head {
+  color: inherit;
+}
+
+.wtl-table .sort-head:hover,
+.table-wrap > table .sort-head:hover {
+  background: transparent;
+  color: var(--wtl-accent-strong);
+}
+
+.wtl-table .sort-mark,
+.wtl-table .sort-indicator,
+.table-wrap > table .sort-mark,
+.table-wrap > table .sort-indicator {
+  color: var(--wtl-accent);
+}
+
+.wtl-table td.wrap-cell,
+.table-wrap > table td.wrap-cell {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.wtl-table :is(.pid, .ppid, .score, .connections, .size, .duration, .event, .count),
+.table-wrap > table :is(.pid, .ppid, .score, .connections, .size, .duration, .event, .count) {
+  font-variant-numeric: tabular-nums;
+}
+
+.wtl-table :is(.md5, .hash, .address, .endpoint),
+.table-wrap > table :is(.md5, .hash, .address, .endpoint) {
+  font-family: Consolas, "Cascadia Mono", "Microsoft YaHei UI", monospace;
+  font-size: 12px;
+}
+
+.wtl-table .empty,
+.table-wrap > table .empty {
+  padding: 18px;
+  background: var(--wtl-surface);
+  color: var(--wtl-muted);
+}
+
+:root[data-density="compact"] .wtl-table :is(.pill, .tag, .badge, .risk-badge),
+:root[data-density="compact"] .table-wrap > table :is(.pill, .tag, .badge, .risk-badge) {
+  min-height: 20px;
+  padding-top: 1px;
+  padding-bottom: 1px;
+}
+
+:root[data-density="compact"] .wtl-table thead th,
+:root[data-density="compact"] .table-wrap > table thead th,
+:root[data-density="compact"] table.process-table thead th,
+:root[data-density="compact"] table.detail-table thead th,
+:root[data-density="compact"] table.source-table thead th,
+:root[data-density="compact"] table.summary-table thead th,
+:root[data-density="compact"] table.wmi-table thead th {
+  height: 26px;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}

@@ -52,6 +52,7 @@ type Server struct {
 	investigationMu    sync.Mutex
 	investigationCache map[string]investigationCacheEntry
 	evidenceStore      *evidence.Store
+	connectionMonitor  *connectionMonitor
 }
 
 type aiPreviewEntry struct {
@@ -66,7 +67,20 @@ func New(options Options) *Server {
 		aiPreviews:         make(map[string]aiPreviewEntry),
 		investigationCache: make(map[string]investigationCacheEntry),
 		evidenceStore:      evidence.NewStore(),
+		connectionMonitor:  newConnectionMonitor(),
 	}
+}
+
+// StartConnectionMonitor starts a read-only, application-lifetime TCP table sampler.
+func (s *Server) StartConnectionMonitor() {
+	s.connectionMonitor.start(func() ([]liveConnectionItem, error) {
+		return s.collectLiveConnectionsWithForces(false, true)
+	})
+}
+
+// Close stops background collectors owned by the server.
+func (s *Server) Close() {
+	s.connectionMonitor.close()
 }
 
 func (s *Server) Routes() http.Handler {
@@ -99,6 +113,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/network/history.csv", s.handleNetworkHistoryCSV)
 	mux.HandleFunc("/api/network/live", s.handleNetworkLive)
 	mux.HandleFunc("/api/network/live.csv", s.handleNetworkLiveCSV)
+	mux.HandleFunc("/api/network/monitor", s.handleNetworkMonitor)
+	mux.HandleFunc("/api/network/monitor.csv", s.handleNetworkMonitorCSV)
 	mux.HandleFunc("/api/security/events", s.handleSecurityEvents)
 	mux.HandleFunc("/api/security/events.csv", s.handleSecurityEventsCSV)
 	mux.HandleFunc("/api/log/health", s.handleLogHealth)
@@ -534,6 +550,7 @@ func (s *Server) handleNetworkHistoryCSV(w http.ResponseWriter, r *http.Request)
 }
 
 type liveConnectionItem struct {
+	ObservedAt string `json:"observedAt"`
 	PID        uint32 `json:"pid"`
 	Process    string `json:"process"`
 	Path       string `json:"path"`
@@ -589,21 +606,26 @@ func (s *Server) handleNetworkLiveCSV(w http.ResponseWriter, r *http.Request) {
 	for _, item := range items {
 		rows = append(rows, liveConnectionRow(item))
 	}
-	writeCSV(w, "network-live", []string{"PID", "进程", "父PID", "父进程", "协议", "本地地址", "本地IP", "本地端口", "远程地址", "远程IP", "远程端口", "远程类型", "状态", "路径"}, rows)
+	writeCSV(w, "network-live", []string{"采集时间", "PID", "进程", "父PID", "父进程", "协议", "本地地址", "本地IP", "本地端口", "远程地址", "远程IP", "远程端口", "远程类型", "状态", "路径"}, rows)
 }
 
 func (s *Server) collectLiveConnections(force bool) ([]liveConnectionItem, error) {
+	return s.collectLiveConnectionsWithForces(force, force)
+}
+
+func (s *Server) collectLiveConnectionsWithForces(processForce, connectionForce bool) ([]liveConnectionItem, error) {
 	processes, err := s.evidenceStore.Processes(process.Options{
 		SkipHashes:     true,
 		SkipSignatures: true,
-	}, force)
+	}, processForce)
 	if err != nil {
 		return nil, err
 	}
-	connections, err := s.evidenceStore.Connections(force)
+	connections, err := s.evidenceStore.Connections(connectionForce)
 	if err != nil {
 		return nil, err
 	}
+	observedAt := formatObservationTime(time.Now())
 	byPID := make(map[uint32]process.Info, len(processes))
 	for _, item := range processes {
 		byPID[item.PID] = item
@@ -612,6 +634,7 @@ func (s *Server) collectLiveConnections(force bool) ([]liveConnectionItem, error
 	for _, conn := range connections {
 		proc := byPID[conn.PID]
 		items = append(items, liveConnectionItem{
+			ObservedAt: observedAt,
 			PID:        conn.PID,
 			Process:    proc.Name,
 			Path:       proc.Path,
@@ -629,6 +652,30 @@ func (s *Server) collectLiveConnections(force bool) ([]liveConnectionItem, error
 		})
 	}
 	return items, nil
+}
+
+func (s *Server) handleNetworkMonitor(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	snapshot := s.connectionMonitor.snapshot()
+	snapshot.Items = filterMonitoredConnections(snapshot.Items, r.URL.Query().Get("q"))
+	snapshot.Count = len(snapshot.Items)
+	writeJSON(w, snapshot)
+}
+
+func (s *Server) handleNetworkMonitorCSV(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	items := filterMonitoredConnections(s.connectionMonitor.snapshot().Items, r.URL.Query().Get("q"))
+	rows := make([][]string, 0, len(items))
+	for _, item := range items {
+		rows = append(rows, monitoredConnectionRow(item))
+	}
+	writeCSV(w, "network-monitor", []string{"首次发现", "最后发现", "出现次数", "采样次数", "当前存在", "PID", "进程", "协议", "本地地址", "远程地址", "远程IP", "远程端口", "远程类型", "最后状态", "路径"}, rows)
 }
 
 func (s *Server) handleSecurityEvents(w http.ResponseWriter, r *http.Request) {
@@ -1753,6 +1800,7 @@ func processConnectionRow(item process.ConnectionInfo) []string {
 
 func liveConnectionRow(item liveConnectionItem) []string {
 	return []string{
+		item.ObservedAt,
 		strconv.FormatUint(uint64(item.PID), 10),
 		item.Process,
 		strconv.FormatUint(uint64(item.ParentPID), 10),
@@ -1768,6 +1816,36 @@ func liveConnectionRow(item liveConnectionItem) []string {
 		item.State,
 		item.Path,
 	}
+}
+
+func monitoredConnectionRow(item monitoredConnectionItem) []string {
+	return []string{
+		item.FirstSeen,
+		item.LastSeen,
+		strconv.FormatUint(item.Occurrences, 10),
+		strconv.FormatUint(item.Samples, 10),
+		strconv.FormatBool(item.CurrentlyActive),
+		strconv.FormatUint(uint64(item.PID), 10),
+		item.Process,
+		item.Protocol,
+		item.Local,
+		item.Remote,
+		item.RemoteIP,
+		strconv.FormatUint(uint64(item.RemotePort), 10),
+		item.RemoteKind,
+		item.State,
+		item.Path,
+	}
+}
+
+func filterMonitoredConnections(items []monitoredConnectionItem, q string) []monitoredConnectionItem {
+	filtered := make([]monitoredConnectionItem, 0, len(items))
+	for _, item := range items {
+		if matchesCSVQuery(q, monitoredConnectionRow(item)) {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
 }
 
 func filterLiveConnections(items []liveConnectionItem, q string) []liveConnectionItem {
