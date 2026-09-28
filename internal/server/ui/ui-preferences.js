@@ -3,11 +3,14 @@
   const root = document.documentElement;
   const validThemes = new Set(['system', 'light', 'dark']);
   const validDensities = new Set(['standard', 'compact']);
+  const validFrames = new Set(['integrated', 'system']);
   const systemTheme = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
   const initial = window.__WTL_UI_PREFERENCES || {};
+  const nativeHost = window.__WTL_NATIVE_SHELL || {};
   const state = {
     theme: validThemes.has(initial.theme) ? initial.theme : 'system',
-    density: validDensities.has(initial.density) ? initial.density : 'standard'
+    density: validDensities.has(initial.density) ? initial.density : 'standard',
+    framePreference: validFrames.has(nativeHost.framePreference) ? nativeHost.framePreference : 'integrated'
   };
 
   function actualTheme() {
@@ -30,7 +33,7 @@
     root.dataset.theme = actualTheme();
     root.dataset.themePreference = state.theme;
     root.dataset.density = state.density;
-    window.__WTL_UI_PREFERENCES = { theme: state.theme, density: state.density };
+    window.__WTL_UI_PREFERENCES = { theme: state.theme, density: state.density, framePreference: state.framePreference };
     if (save) persist();
     updatePreferenceControls();
     syncHostTheme();
@@ -55,10 +58,25 @@
       button.tabIndex = selected ? 0 : -1;
       button.classList.toggle('active', selected);
     });
+    document.querySelectorAll('[data-wtl-frame-value]').forEach(button => {
+      const selected = button.dataset.wtlFrameValue === state.framePreference;
+      button.setAttribute('aria-checked', String(selected));
+      button.tabIndex = selected ? 0 : -1;
+      button.classList.toggle('active', selected);
+    });
+    document.querySelectorAll('[data-wtl-frame-status]').forEach(element => {
+      const current = nativeHost.currentFrame === 'system' ? '系统标题栏' : '融合标题栏';
+      const next = state.framePreference === 'system' ? '系统标题栏' : '融合标题栏';
+      const override = nativeHost.frameOverride ? '（本次由命令行强制）' : '';
+      const pending = nativeHost.currentFrame === state.framePreference ? '' : `；下次启动：${next}`;
+      const reason = nativeHost.frameReason ? `；${nativeHost.frameReason}` : '';
+      element.textContent = `当前：${current}${override}${pending}${reason}`;
+    });
     document.querySelectorAll('.wtl-preferences-trigger').forEach(button => {
       const themeNames = { system: '跟随系统', light: '浅色', dark: '深色' };
       const densityName = state.density === 'compact' ? '紧凑' : '标准';
-      button.title = `外观：${themeNames[state.theme]}；列表：${densityName}`;
+      const frameName = state.framePreference === 'system' ? '系统标题栏' : '融合标题栏';
+      button.title = `外观：${themeNames[state.theme]}；列表：${densityName}；窗口：${frameName}`;
     });
   }
 
@@ -85,7 +103,9 @@
     button.addEventListener('keydown', event => {
       const selector = dataName === 'wtlThemeValue'
         ? '[data-wtl-theme-value]'
-        : '[data-wtl-density-value]';
+        : dataName === 'wtlDensityValue'
+          ? '[data-wtl-density-value]'
+          : '[data-wtl-frame-value]';
       moveWithinGroup(event, selector);
     });
     return button;
@@ -137,6 +157,38 @@
     );
 
     menu.append(themeLabel, themeGroup, densityLabel, densityGroup);
+    if (nativeHost.trusted && nativeHost.token && typeof window.wtlWindowAction === 'function') {
+      const frameLabel = document.createElement('div');
+      frameLabel.className = 'wtl-preference-label';
+      frameLabel.textContent = '窗口样式';
+      const frameGroup = document.createElement('div');
+      frameGroup.className = 'wtl-preference-group';
+      frameGroup.setAttribute('role', 'radiogroup');
+      frameGroup.setAttribute('aria-label', '窗口样式');
+      const selectFrame = value => {
+        Promise.resolve(window.wtlWindowAction(nativeHost.token, `frame-preference:${value}`)).then(() => {
+          state.framePreference = value;
+          updatePreferenceControls();
+        }).catch(error => {
+          const status = menu.querySelector('[data-wtl-frame-status]');
+          if (status) status.textContent = `保存窗口样式失败：${error && error.message ? error.message : error}`;
+        });
+      };
+      frameGroup.append(
+        createOption('integrated', '融合标题栏', 'wtlFrameValue', selectFrame),
+        createOption('system', '系统标题栏', 'wtlFrameValue', selectFrame)
+      );
+      const frameStatus = document.createElement('div');
+      frameStatus.className = 'wtl-frame-status';
+      frameStatus.dataset.wtlFrameStatus = '';
+      menu.append(frameLabel, frameGroup, frameStatus);
+      Promise.resolve(window.wtlWindowAction(nativeHost.token, 'frame-preference-get')).then(value => {
+        if (validFrames.has(value)) {
+          state.framePreference = value;
+          updatePreferenceControls();
+        }
+      }).catch(() => {});
+    }
     container.append(trigger, menu);
     meta.append(container);
 
@@ -186,17 +238,87 @@
 
     const dialog = document.createElement('dialog');
     dialog.className = 'wtl-about-dialog';
-    dialog.innerHTML = '<div class="dialog-head"><h2>关于 WinTraceLens</h2><button type="button" class="secondary" data-about-close>关闭</button></div><dl class="dialog-body"><dt>版本</dt><dd data-about-version>-</dd></dl>';
+    dialog.setAttribute('aria-labelledby', 'wtl-about-title');
+    dialog.innerHTML = `
+      <div class="wtl-about-shell">
+        <div class="wtl-about-head">
+          <div class="wtl-about-identity">
+            <span class="wtl-about-mark" aria-hidden="true"></span>
+            <div>
+              <h2 id="wtl-about-title">WinTraceLens</h2>
+              <p>Windows 应急响应与现场取证</p>
+            </div>
+          </div>
+          <button type="button" class="wtl-about-close" data-about-close title="关闭" aria-label="关闭">&#x00D7;</button>
+        </div>
+        <div class="wtl-about-content">
+          <div class="wtl-about-release">
+            <span class="wtl-about-version" data-about-version>-</span>
+            <span class="wtl-about-local">本机运行</span>
+          </div>
+          <p class="wtl-about-summary">面向受攻击 Windows 主机的快速现场排查与证据收集工具，集中查看进程、持久化、事件日志、通信与文件痕迹。</p>
+          <div class="wtl-about-capabilities" aria-label="主要能力">
+            <span>进程与内存</span>
+            <span>持久化与日志</span>
+            <span>通信与文件痕迹</span>
+          </div>
+          <dl class="wtl-about-facts">
+            <div><dt>运行环境</dt><dd data-about-platform>检测中</dd></div>
+            <div><dt>当前权限</dt><dd data-about-permission>检测中</dd></div>
+            <div class="wide"><dt>兼容性</dt><dd data-about-compatibility>检测中</dd></div>
+          </dl>
+          <p class="wtl-about-boundary"><strong>使用边界</strong><span>以只读采集和辅助分析为主，不执行样本，不自动上传证据，不代替完整内存取证或专业 EDR。</span></p>
+        </div>
+        <div class="wtl-about-footer">
+          <span>界面资源随程序提供，可在离线环境中使用。</span>
+          <button type="button" data-about-close>完成</button>
+        </div>
+      </div>`;
     document.body.appendChild(dialog);
 
-    function openAbout() {
+    function platformLabel(info) {
+      const arch = { amd64: 'x64', '386': 'x86', arm64: 'ARM64' }[info.goarch] || info.goarch || '-';
+      const os = info.goos === 'windows' ? 'Windows' : (info.goos || '未知系统');
+      return `${os} / ${arch}`;
+    }
+
+    function updateAboutInfo(info) {
       const version = document.querySelector('[data-app-version]');
-      dialog.querySelector('[data-about-version]').textContent = version ? version.textContent.trim() : '-';
+      const versionText = info && info.version ? info.version : (version ? version.textContent.trim() : '-');
+      const permissionText = info && info.adminKnown
+        ? (info.isAdmin ? '管理员权限' : '标准用户权限')
+        : '权限状态未知';
+      const compatibilityText = info && info.compatibility ? info.compatibility : '未获取兼容性信息';
+      const platformText = info ? platformLabel(info) : 'Windows';
+
+      dialog.querySelector('[data-about-version]').textContent = versionText || '-';
+      dialog.querySelector('[data-about-platform]').textContent = platformText;
+      dialog.querySelector('[data-about-permission]').textContent = permissionText;
+      const compatibility = dialog.querySelector('[data-about-compatibility]');
+      compatibility.textContent = compatibilityText;
+      compatibility.title = compatibilityText;
+    }
+
+    async function refreshAboutInfo() {
+      try {
+        const response = await fetch('/api/about', { cache: 'no-store' });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        updateAboutInfo(await response.json());
+      } catch (_) {
+        updateAboutInfo(null);
+      }
+    }
+
+    function openAbout() {
+      updateAboutInfo(null);
       dialog.showModal();
+      refreshAboutInfo();
     }
 
     trigger.addEventListener('click', openAbout);
-    dialog.querySelector('[data-about-close]').addEventListener('click', () => dialog.close());
+    dialog.querySelectorAll('[data-about-close]').forEach(button => {
+      button.addEventListener('click', () => dialog.close());
+    });
     dialog.addEventListener('click', event => {
       if (event.target === dialog) dialog.close();
     });
@@ -230,6 +352,16 @@
         maximize.setAttribute('aria-label', maximize.title);
       }).catch(() => {});
     }
+    let rectUpdateFrame = 0;
+    function updateMaximizeHitRegion() {
+      if (rectUpdateFrame) cancelAnimationFrame(rectUpdateFrame);
+      rectUpdateFrame = requestAnimationFrame(() => {
+        rectUpdateFrame = 0;
+        const rect = maximize.getBoundingClientRect();
+        const scale = window.devicePixelRatio || 1;
+        invoke(`max-button-rect:${rect.left},${rect.top},${rect.width},${rect.height},${scale}`).catch(() => {});
+      });
+    }
 
     controls.querySelector('.minimize').addEventListener('click', () => invoke('minimize').catch(() => {}));
     maximize.addEventListener('click', () => invoke('toggle-maximize').then(updateWindowState).catch(() => {}));
@@ -260,8 +392,13 @@
       event.preventDefault();
       invoke('system-menu').then(updateWindowState).catch(() => {});
     });
-    window.addEventListener('resize', updateWindowState);
+    window.addEventListener('resize', () => {
+      updateWindowState();
+      updateMaximizeHitRegion();
+    });
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', updateMaximizeHitRegion);
     updateWindowState();
+    updateMaximizeHitRegion();
   }
 
   function markTable(table) {
@@ -318,22 +455,83 @@
     if (location.pathname !== '/' && location.pathname !== '/index.html') return;
     const detail = document.querySelector('section.detail');
     const head = detail && detail.querySelector('.detail-head');
-    if (!detail || !head || head.querySelector('.wtl-detail-toggle')) return;
+    if (!detail || !head) return;
 
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'secondary mini wtl-detail-toggle';
-    button.textContent = '收起详情';
-    button.setAttribute('aria-expanded', 'true');
-    button.addEventListener('click', () => {
-      const collapsed = detail.classList.toggle('wtl-detail-collapsed');
-      document.body.classList.toggle('wtl-detail-collapsed', collapsed);
-      button.textContent = collapsed ? '展开详情' : '收起详情';
-      button.setAttribute('aria-expanded', String(!collapsed));
-    });
-    head.append(button);
+    const button = head.querySelector('.wtl-detail-toggle');
+    if (button && !button.dataset.wtlBound) {
+      button.dataset.wtlBound = 'true';
+      button.addEventListener('click', () => {
+        const collapsed = detail.classList.toggle('wtl-detail-collapsed');
+        document.body.classList.toggle('wtl-detail-collapsed', collapsed);
+        button.textContent = collapsed ? '展开详情' : '收起详情';
+        button.setAttribute('aria-expanded', String(!collapsed));
+      });
+    }
 
-    const resizer = document.createElement('div');
+    const menuTrigger = head.querySelector('#detail-more-trigger');
+    const menu = document.querySelector('#detail-more-menu');
+    if (menuTrigger && menu && !menuTrigger.dataset.wtlBound) {
+      menuTrigger.dataset.wtlBound = 'true';
+      const enabledItems = () => Array.from(menu.querySelectorAll('[role="menuitem"]:not(:disabled)'));
+      const positionMenu = () => {
+        const triggerRect = menuTrigger.getBoundingClientRect();
+        const menuRect = menu.getBoundingClientRect();
+        const margin = 8;
+        const left = Math.max(margin, Math.min(triggerRect.right - menuRect.width, innerWidth - menuRect.width - margin));
+        let top = triggerRect.bottom + 4;
+        if (top + menuRect.height > innerHeight - margin) top = Math.max(margin, triggerRect.top - menuRect.height - 4);
+        menu.style.left = `${Math.round(left)}px`;
+        menu.style.top = `${Math.round(top)}px`;
+      };
+      const closeMenu = returnFocus => {
+        if (menu.hidden) return;
+        menu.hidden = true;
+        menuTrigger.setAttribute('aria-expanded', 'false');
+        if (returnFocus) menuTrigger.focus();
+      };
+      const openMenu = () => {
+        if (menuTrigger.disabled) return;
+        menu.hidden = false;
+        menuTrigger.setAttribute('aria-expanded', 'true');
+        positionMenu();
+        const items = enabledItems();
+        if (items.length) items[0].focus();
+      };
+      menuTrigger.addEventListener('click', () => menu.hidden ? openMenu() : closeMenu(false));
+      menuTrigger.addEventListener('keydown', event => {
+        if (event.key === 'ArrowDown') {
+          event.preventDefault();
+          openMenu();
+        }
+      });
+      menu.addEventListener('keydown', event => {
+        const items = enabledItems();
+        const index = items.indexOf(document.activeElement);
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          closeMenu(true);
+        } else if (items.length && ['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+          event.preventDefault();
+          let next = index;
+          if (event.key === 'Home') next = 0;
+          else if (event.key === 'End') next = items.length - 1;
+          else next = (index + (event.key === 'ArrowUp' ? -1 : 1) + items.length) % items.length;
+          items[next].focus();
+        }
+      });
+      menu.addEventListener('click', event => {
+        if (event.target.closest('[role="menuitem"]')) closeMenu(true);
+      });
+      document.addEventListener('pointerdown', event => {
+        if (!menu.hidden && !menu.contains(event.target) && !menuTrigger.contains(event.target)) closeMenu(false);
+      });
+      window.addEventListener('resize', () => closeMenu(false));
+      window.addEventListener('scroll', () => closeMenu(false), true);
+    }
+
+    let resizer = detail.querySelector('.wtl-detail-resizer');
+    if (resizer) return;
+    resizer = document.createElement('div');
     resizer.className = 'wtl-detail-resizer';
     resizer.setAttribute('role', 'separator');
     resizer.setAttribute('aria-orientation', 'horizontal');

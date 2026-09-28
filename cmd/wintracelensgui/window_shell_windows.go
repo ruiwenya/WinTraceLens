@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -24,10 +26,12 @@ const (
 	wmClose            = 0x0010
 	wmSize             = 0x0005
 	wmGetMinMaxInfo    = 0x0024
+	wmNCHitTest        = 0x0084
 	wmNCDestroy        = 0x0082
 	wmNCLButtonDown    = 0x00a1
 	wmSysCommand       = 0x0112
 	htCaption          = 2
+	htMaxButton        = 9
 	swMinimize         = 6
 	swMaximize         = 3
 	swRestore          = 9
@@ -44,6 +48,8 @@ const (
 	dwmaImmersiveDark  = 20
 	dwmaImmersiveDark2 = 19
 	monitorNearest     = 2
+	spiGetHighContrast = 0x0042
+	hcfHighContrastOn  = 0x00000001
 )
 
 var (
@@ -64,15 +70,23 @@ var (
 	callWindowProcW       = user32.NewProc("CallWindowProcW")
 	monitorFromWindow     = user32.NewProc("MonitorFromWindow")
 	getMonitorInfoW       = user32.NewProc("GetMonitorInfoW")
+	getClientRect         = user32.NewProc("GetClientRect")
+	screenToClient        = user32.NewProc("ScreenToClient")
+	systemParametersInfoW = user32.NewProc("SystemParametersInfoW")
 	dwmSetWindowAttribute = dwmapi.NewProc("DwmSetWindowAttribute")
 	windowProcedures      sync.Map
+	windowMaxButtonRects  sync.Map
 	windowProcCallback    = windows.NewCallback(windowShellProcedure)
 )
 
 type nativeShellBootstrap struct {
-	Trusted     bool   `json:"trusted"`
-	CustomFrame bool   `json:"customFrame"`
-	Token       string `json:"token"`
+	Trusted         bool   `json:"trusted"`
+	CustomFrame     bool   `json:"customFrame"`
+	CurrentFrame    string `json:"currentFrame"`
+	FramePreference string `json:"framePreference"`
+	FrameOverride   bool   `json:"frameOverride"`
+	FrameReason     string `json:"frameReason,omitempty"`
+	Token           string `json:"token"`
 }
 
 type nativePoint struct {
@@ -95,6 +109,19 @@ type nativeMonitorInfo struct {
 	Flags   uint32
 }
 
+type nativeHighContrast struct {
+	Size   uint32
+	Flags  uint32
+	Scheme uintptr
+}
+
+type nativeRect struct {
+	Left   int32
+	Top    int32
+	Right  int32
+	Bottom int32
+}
+
 func newWindowShellToken() (string, error) {
 	buffer := make([]byte, 24)
 	if _, err := rand.Read(buffer); err != nil {
@@ -103,12 +130,12 @@ func newWindowShellToken() (string, error) {
 	return hex.EncodeToString(buffer), nil
 }
 
-func windowShellInitScript(origin, token string, customFrame bool) (string, error) {
+func windowShellInitScript(origin string, bootstrap nativeShellBootstrap) (string, error) {
 	originJSON, err := json.Marshal(origin)
 	if err != nil {
 		return "", err
 	}
-	payload, err := json.Marshal(nativeShellBootstrap{Trusted: true, CustomFrame: customFrame, Token: token})
+	payload, err := json.Marshal(bootstrap)
 	if err != nil {
 		return "", err
 	}
@@ -180,6 +207,7 @@ func restoreWindowProcedure(hwnd uintptr) {
 	}
 	index := int32(gwlpWndProc)
 	setWindowLongPtrW.Call(hwnd, uintptr(index), previous.(uintptr))
+	windowMaxButtonRects.Delete(hwnd)
 }
 
 func windowShellProcedure(hwnd, message, wParam, lParam uintptr) uintptr {
@@ -188,14 +216,77 @@ func windowShellProcedure(hwnd, message, wParam, lParam uintptr) uintptr {
 		return 0
 	}
 	previous := previousValue.(uintptr)
+	if message == wmNCHitTest && maxButtonHit(hwnd, lParam) {
+		return htMaxButton
+	}
 	result, _, _ := callWindowProcW.Call(previous, hwnd, message, wParam, lParam)
 	if message == wmGetMinMaxInfo && lParam != 0 {
 		applyMonitorWorkArea(hwnd, (*nativeMinMaxInfo)(unsafe.Pointer(lParam)))
 	}
 	if message == wmNCDestroy {
 		windowProcedures.Delete(hwnd)
+		windowMaxButtonRects.Delete(hwnd)
 	}
 	return result
+}
+
+func maxButtonHit(hwnd, lParam uintptr) bool {
+	point := nativePoint{
+		X: int32(int16(uint16(lParam & 0xffff))),
+		Y: int32(int16(uint16((lParam >> 16) & 0xffff))),
+	}
+	converted, _, _ := screenToClient.Call(hwnd, uintptr(unsafe.Pointer(&point)))
+	if converted == 0 {
+		return false
+	}
+	if value, ok := windowMaxButtonRects.Load(hwnd); ok {
+		rect := value.(nativeRect)
+		if point.X >= rect.Left && point.X < rect.Right && point.Y >= rect.Top && point.Y < rect.Bottom {
+			return true
+		}
+	}
+
+	// The HTML shell uses three fixed 46 CSS-pixel caption buttons. This native
+	// fallback keeps Snap hit testing available during initial navigation and if
+	// the WebView bridge cannot refresh the measured rectangle.
+	client := nativeRect{}
+	ok, _, _ := getClientRect.Call(hwnd, uintptr(unsafe.Pointer(&client)))
+	if ok == 0 {
+		return false
+	}
+	const buttonWidth = int32(46)
+	const headerHeight = int32(42)
+	return point.X >= client.Right-2*buttonWidth && point.X < client.Right-buttonWidth && point.Y >= 0 && point.Y < headerHeight
+}
+
+func updateMaxButtonRect(hwnd uintptr, value string) error {
+	parts := strings.Split(value, ",")
+	if len(parts) != 5 {
+		return errors.New("invalid maximize button rectangle")
+	}
+	values := make([]float64, len(parts))
+	for index, part := range parts {
+		parsed, err := strconv.ParseFloat(strings.TrimSpace(part), 64)
+		if err != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) {
+			return errors.New("invalid maximize button rectangle")
+		}
+		values[index] = parsed
+	}
+	x, y, width, height, scale := values[0], values[1], values[2], values[3], values[4]
+	if x < 0 || y < 0 || width < 8 || height < 8 || scale < 0.5 || scale > 8 || x+width > 10000 || y+height > 10000 {
+		return errors.New("maximize button rectangle out of range")
+	}
+	rect := nativeRect{
+		Left:   int32(math.Round(x * scale)),
+		Top:    int32(math.Round(y * scale)),
+		Right:  int32(math.Round((x + width) * scale)),
+		Bottom: int32(math.Round((y + height) * scale)),
+	}
+	if rect.Right <= rect.Left || rect.Bottom <= rect.Top {
+		return errors.New("empty maximize button rectangle")
+	}
+	windowMaxButtonRects.Store(hwnd, rect)
+	return nil
 }
 
 func applyMonitorWorkArea(hwnd uintptr, limits *nativeMinMaxInfo) {
@@ -226,6 +317,17 @@ func systemWindowTheme() string {
 		return "dark"
 	}
 	return "light"
+}
+
+func systemHighContrastEnabled() bool {
+	settings := nativeHighContrast{Size: uint32(unsafe.Sizeof(nativeHighContrast{}))}
+	ok, _, _ := systemParametersInfoW.Call(
+		spiGetHighContrast,
+		uintptr(settings.Size),
+		uintptr(unsafe.Pointer(&settings)),
+		0,
+	)
+	return ok != 0 && settings.Flags&hcfHighContrastOn != 0
 }
 
 func colorRef(red, green, blue byte) uint32 {
@@ -260,7 +362,7 @@ func applyWindowTheme(hwnd uintptr, theme string) {
 	setDWMAttribute(hwnd, dwmaBorderColor, unsafe.Pointer(&border), unsafe.Sizeof(border))
 }
 
-func runWindowAction(hwnd uintptr, token, expectedToken, action string) (string, error) {
+func runWindowAction(hwnd uintptr, token, expectedToken, preferencesPath, action string) (string, error) {
 	if token == "" || token != expectedToken {
 		return "", errors.New("window action denied")
 	}
@@ -269,6 +371,29 @@ func runWindowAction(hwnd uintptr, token, expectedToken, action string) (string,
 			return "", errors.New("invalid window theme")
 		}
 		applyWindowTheme(hwnd, theme)
+		return windowState(hwnd), nil
+	}
+	if frame, ok := strings.CutPrefix(action, "frame-preference:"); ok {
+		if err := saveWindowFramePreference(preferencesPath, frame); err != nil {
+			return "", fmt.Errorf("save window frame preference: %w", err)
+		}
+		return frame, nil
+	}
+	if action == "frame-preference-get" {
+		frame, err := loadWindowFramePreference(preferencesPath)
+		if err != nil {
+			return "", fmt.Errorf("load window frame preference: %w", err)
+		}
+		return frame, nil
+	}
+	if rectangle, ok := strings.CutPrefix(action, "max-button-rect:"); ok {
+		if err := updateMaxButtonRect(hwnd, rectangle); err != nil {
+			return "", err
+		}
+		return windowState(hwnd), nil
+	}
+	if action == "clear-max-button-rect" {
+		windowMaxButtonRects.Delete(hwnd)
 		return windowState(hwnd), nil
 	}
 

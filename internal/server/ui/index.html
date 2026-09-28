@@ -332,7 +332,8 @@
     }
 
     .detail-head {
-      display: flex;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
       align-items: center;
       gap: 8px;
       padding: 10px 12px;
@@ -342,11 +343,17 @@
 
     .detail-title {
       min-width: 0;
-      flex: 1;
       font-weight: 650;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+
+    .detail-head-actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-width: max-content;
     }
 
     .detail-meta {
@@ -477,7 +484,7 @@
   <header>
     <h1>WinTraceLens</h1>
     <div class="app-meta">
-      <span class="release-badge" data-app-version>1.0 基础版</span>
+      <span class="release-badge" data-app-version>2.0.0</span>
       <span class="permission-badge unknown" data-admin-status>权限检测中</span>
       <span class="module-title">Windows 进程 MD5 与签名快速查看</span>
     </div>
@@ -538,13 +545,15 @@
 
     <section class="panel detail">
       <div class="detail-head">
-        <div id="detail-title" class="detail-title">未选择进程</div>
-        <button id="detail-copy-md5" class="secondary" disabled>复制 MD5</button>
-        <button id="detail-export-modules" class="secondary" disabled>导出模块</button>
-        <button id="detail-export-connections" class="secondary" disabled>导出连接</button>
-        <button id="detail-open-history" class="secondary" disabled>查历史通信</button>
-        <button id="detail-refresh-connections" class="secondary" disabled>刷新连接</button>
-        <button id="detail-open-path" class="secondary" disabled>打开位置</button>
+        <div id="detail-title" class="detail-title" title="未选择进程">
+          <span id="detail-title-name" class="detail-title-name">未选择进程</span>
+          <span id="detail-title-meta" class="detail-meta"></span>
+        </div>
+        <div class="detail-head-actions">
+          <button id="detail-copy-md5" class="secondary" disabled>复制 MD5</button>
+          <button id="detail-more-trigger" class="secondary" type="button" aria-haspopup="menu" aria-expanded="false" disabled>更多</button>
+          <button id="detail-toggle" class="secondary mini wtl-detail-toggle" type="button" aria-expanded="true">收起详情</button>
+        </div>
       </div>
       <div class="tabs">
         <button id="tab-basic" class="tab active">基础信息</button>
@@ -558,14 +567,25 @@
     </section>
   </main>
 
+  <div id="detail-more-menu" class="detail-more-menu" role="menu" aria-label="进程详情操作" hidden>
+    <button id="detail-export-modules" class="secondary" type="button" role="menuitem" disabled>导出模块</button>
+    <button id="detail-export-connections" class="secondary" type="button" role="menuitem" disabled>导出连接</button>
+    <button id="detail-open-history" class="secondary" type="button" role="menuitem" disabled>查历史通信</button>
+    <button id="detail-refresh-connections" class="secondary" type="button" role="menuitem" disabled>刷新连接</button>
+    <button id="detail-open-path" class="secondary" type="button" role="menuitem" disabled>打开位置</button>
+  </div>
+
   <script>
     const rows = document.getElementById('rows');
     const filter = document.getElementById('filter');
     const connectionSort = document.getElementById('connection-sort');
     const statusEl = document.getElementById('status');
     const detailTitle = document.getElementById('detail-title');
+    const detailTitleName = document.getElementById('detail-title-name');
+    const detailTitleMeta = document.getElementById('detail-title-meta');
     const detailBody = document.getElementById('detail-body');
     const detailCopyMD5 = document.getElementById('detail-copy-md5');
+    const detailMoreTrigger = document.getElementById('detail-more-trigger');
     const detailExportModules = document.getElementById('detail-export-modules');
     const detailExportConnections = document.getElementById('detail-export-connections');
     const detailOpenHistory = document.getElementById('detail-open-history');
@@ -647,6 +667,22 @@
       return items.map(([name, value]) => { const display = value == null || value === '' ? '-' : value; return `<div>${escapeCell(name)}</div><div title="${escapeCell(display)}">${escapeCell(display)}</div>`; }).join('');
     }
 
+    function detailFields(items) {
+      return items.map(([name, value, options]) => {
+        const display = value == null || value === '' ? '-' : value;
+        const settings = options || {};
+        const classes = ['detail-field'];
+        if (settings.wide) classes.push('wide');
+        const copy = settings.copy && display !== '-'
+          ? `<button type="button" class="secondary mini detail-value-copy" data-copy-detail-value="${escapeCell(display)}" data-copy-detail-label="${escapeCell(name)}">复制</button>`
+          : '';
+        return `<div class="${classes.join(' ')}">
+          <span class="detail-field-label">${escapeCell(name)}</span>
+          <span class="detail-field-value-row"><span class="detail-field-value" title="${escapeCell(display)}">${escapeCell(display)}</span>${copy}</span>
+        </div>`;
+      }).join('');
+    }
+
     function processLine(p) {
       if (!p) return '-';
       return `${p.name || '-'} | PID ${p.pid || '-'} | ${p.path || p.pathError || '-'}`;
@@ -689,8 +725,11 @@
     function renderDetailShell(loading) {
       const p = selectedProcess();
       if (!p) {
-        detailTitle.textContent = '未选择进程';
+        detailTitleName.textContent = '未选择进程';
+        detailTitleMeta.textContent = '';
+        detailTitle.title = '未选择进程';
         detailCopyMD5.disabled = true;
+        detailMoreTrigger.disabled = true;
         detailExportModules.disabled = true;
         detailExportConnections.disabled = true;
         detailOpenHistory.disabled = true;
@@ -700,8 +739,12 @@
         return;
       }
 
-      detailTitle.innerHTML = `${escapeCell(p.name)} <span class="detail-meta">PID ${escapeCell(p.pid)} | ${escapeCell(p.path || p.pathError || '')}</span>`;
+      const detailPath = p.path || p.pathError || '-';
+      detailTitleName.textContent = p.name || '-';
+      detailTitleMeta.textContent = ` · PID ${p.pid} · ${detailPath}`;
+      detailTitle.title = `${p.name || '-'} · PID ${p.pid} · ${detailPath}`;
       detailCopyMD5.disabled = !p.md5;
+      detailMoreTrigger.disabled = false;
       detailExportModules.disabled = false;
       detailExportConnections.disabled = false;
       detailOpenHistory.disabled = false;
@@ -753,17 +796,17 @@
         return;
       }
       const children = processes.filter(item => item.parentPid === p.pid);
-      detailBody.innerHTML = `<div class="detail-overview">
-        <section class="detail-block">
-          <h2>进程基础信息</h2>
-          <div class="kv">${kvRows([
+      detailBody.innerHTML = `<div class="detail-overview detail-overview-basic">
+        <section class="detail-basic">
+          <h2 class="detail-section-title">进程基础信息</h2>
+          <div class="detail-field-grid">${detailFields([
             ['PID', p.pid],
             ['进程名', p.name],
             ['父 PID', p.parentPid],
             ['父进程', p.parentName],
             ['创建时间', p.createdAt],
             ['父进程创建时间', p.parentCreatedAt],
-            ['完整命令行', p.commandLine],
+            ['完整命令行', p.commandLine, { wide: true, copy: true }],
             ['运行账户', p.userName],
             ['用户 SID', p.userSid],
             ['会话 ID', p.sessionId],
@@ -774,10 +817,10 @@
             ['句柄数', p.handleCount],
             ['私有内存', formatMB(p.privateMemoryBytes) ? `${formatMB(p.privateMemoryBytes)} MB` : ''],
             ['工作集', formatMB(p.workingSetBytes) ? `${formatMB(p.workingSetBytes)} MB` : ''],
-            ['MD5', p.md5 || p.hashError],
+            ['MD5', p.md5 || p.hashError, { wide: true, copy: Boolean(p.md5) }],
             ['签名', p.signature],
             ['签名说明', p.signatureMsg],
-            ['路径', p.path || p.pathError],
+            ['路径', p.path || p.pathError, { wide: true, copy: Boolean(p.path) }],
             ['文件创建', p.fileCreated],
             ['文件修改', p.fileModified],
             ['实时连接数', p.connectionCount],
@@ -785,12 +828,12 @@
             ['枚举差异', p.enumerationWarning]
           ])}</div>
         </section>
-        <section class="detail-block">
-          <h2>父子进程</h2>
-          <div class="kv">${kvRows([
+        <section class="detail-relations">
+          <h2 class="detail-section-title">父子进程</h2>
+          <div class="detail-relation-grid">${detailFields([
             ['父进程', p.parentName ? `${p.parentName} | PID ${p.parentPid}` : '-'],
             ['子进程数量', children.length],
-            ['子进程', children.map(processLine).join('；') || '-']
+            ['子进程', children.map(processLine).join('；') || '-', { wide: true }]
           ])}</div>
         </section>
       </div>`;
@@ -1126,6 +1169,11 @@
     });
 
     detailBody.addEventListener('click', event => {
+      const detailValueCopy = event.target.closest('button[data-copy-detail-value]');
+      if (detailValueCopy) {
+        copyText(detailValueCopy.dataset.copyDetailValue, `已复制${detailValueCopy.dataset.copyDetailLabel || '详情'}`);
+        return;
+      }
       const evidenceButton = event.target.closest('button[data-action="refresh-evidence"]');
       if (evidenceButton) {
         loadSelectedEvidence(true).then(renderDetail);

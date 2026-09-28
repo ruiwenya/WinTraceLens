@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "2.0.0-preview.5",
+    [string]$Version = "2.0.0",
     [string]$OutputDirectory = "dist",
     [string]$SignToolPath = "",
     [string]$CertificateThumbprint = "",
@@ -18,7 +18,7 @@ try {
     & go generate .\cmd\wintracelensgui
     if ($LASTEXITCODE -ne 0) { throw "GUI resource generation failed" }
 
-    & go build -trimpath -ldflags "-H windowsgui -s -w -X main.version=$Version-gui" -o $guiPath .\cmd\wintracelensgui
+    & go build -trimpath -ldflags "-H windowsgui -s -w -X main.version=$Version" -o $guiPath .\cmd\wintracelensgui
     if ($LASTEXITCODE -ne 0) { throw "GUI build failed" }
 
     & go build -trimpath -ldflags "-s -w -X main.version=$Version" -o $cliPath .\cmd\wintracelens

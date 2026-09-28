@@ -122,12 +122,14 @@ AI 分析会把用户确认的证据发送到所选在线模型服务。企业�
 
 ## 下载与运行
 
-最新 WebView2 预览版可从 [GitHub Releases](https://github.com/ruiwenya/WinTraceLens/releases) 下载：
+最新正式版可从 [GitHub Releases](https://github.com/ruiwenya/WinTraceLens/releases) 下载：
 
 - `WinTraceLens.exe`：桌面 GUI 版本，推荐普通用户使用。
 - `WinTraceLens-cli.exe`：启动本地 HTTP 服务并使用默认浏览器打开界面，适合调试和浏览器模式。
 
 GUI 版本需要 Microsoft Edge WebView2 Runtime。建议在 Windows 10、Windows 11 和较新的 Windows Server 上使用，并尽量以管理员权限运行，否则安全日志、PID 4 模块、部分进程路径、签名和系统取证源可能读取不完整。
+
+右上角“关于”会显示当前版本、运行架构、管理员权限状态和兼容范围。界面所需的 HTML、CSS、JavaScript、图标和字体均随程序本地提供，离线运行不会加载第三方网页资源；只有用户主动使用 AI 分析时才会连接所选模型接口。
 
 CLI 示例：
 
@@ -171,7 +173,7 @@ go build -trimpath -ldflags "-s -w" -o dist\WinTraceLens-cli.exe .\cmd\wintracel
 也可使用统一构建脚本：
 
 ```powershell
-.\scripts\build-release.ps1 -Version 2.0.0-preview
+.\scripts\build-release.ps1 -Version 2.0.0
 ```
 
 ### 发布签名与 Smart App Control
@@ -182,7 +184,7 @@ go build -trimpath -ldflags "-s -w" -o dist\WinTraceLens-cli.exe .\cmd\wintracel
 
 ```powershell
 .\scripts\build-release.ps1 `
-  -Version 2.0.0-preview `
+  -Version 2.0.0 `
   -SignToolPath "C:\Program Files (x86)\Windows Kits\10\bin\<SDK版本>\x64\signtool.exe" `
   -CertificateThumbprint "<代码签名证书指纹>"
 ```
@@ -191,10 +193,10 @@ go build -trimpath -ldflags "-s -w" -o dist\WinTraceLens-cli.exe .\cmd\wintracel
 可选测试：
 
 ```powershell
-go test ./...
+.\scripts\test-without-blocked-exes.ps1
 ```
 
-部分安全软件可能对未签名的应急响应工具、进程枚举、内存读取或测试 EXE 产生告警。建议核对源码和哈希后，在授权的隔离测试环境中验证，不建议通过长期关闭安全软件来规避告警。
+该脚本不会编译 `internal/server`、`internal/investigation` 和 GUI 包的测试 EXE，避免生成已知会被终端安全软件拦截的 `server.test.exe`、`investigation.test.exe` 等文件；这些路径通过正式 CLI/GUI 构建和端到端 UI 测试验证。部分安全软件仍可能对未签名的应急响应工具、进程枚举、内存读取或其他测试 EXE 产生告警。建议核对源码和哈希后，在授权的隔离测试环境中验证，不建议通过长期关闭安全软件来规避告警。
 
 ## 检测边界
 

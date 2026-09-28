@@ -21,7 +21,7 @@ import (
 	"github.com/ruiwenya/WinTraceLens/internal/server"
 )
 
-var version = "2.0.0-preview.5"
+var version = "2.0.0"
 
 func main() {
 	runtime.LockOSThread()
@@ -36,6 +36,22 @@ func main() {
 	if *showVersion {
 		fmt.Println(version)
 		return
+	}
+
+	preferencesPath := windowPreferencesPath()
+	framePreference, preferenceErr := loadWindowFramePreference(preferencesPath)
+	frameReason := ""
+	if preferenceErr != nil {
+		framePreference = windowFrameIntegrated
+		frameReason = fmt.Sprintf("无法读取窗口样式设置，已使用默认融合模式：%v", preferenceErr)
+	}
+	useCustomFrame := framePreference == windowFrameIntegrated
+	if *systemFrame {
+		useCustomFrame = false
+		frameReason = "命令行参数 -system-frame 已强制使用系统标题栏"
+	} else if systemHighContrastEnabled() {
+		useCustomFrame = false
+		frameReason = "检测到 Windows 高对比度模式，已回退到系统标题栏"
 	}
 
 	listener, err := loopback.Listen(*addr)
@@ -82,8 +98,11 @@ func main() {
 
 	hwnd := uintptr(w.Window())
 	customFrame := false
-	if !*systemFrame {
+	if useCustomFrame {
 		customFrame = installCustomWindowFrame(hwnd)
+		if !customFrame {
+			frameReason = "融合标题栏初始化失败，已回退到系统标题栏"
+		}
 	}
 	applyWindowTheme(hwnd, systemWindowTheme())
 	shellToken, err := newWindowShellToken()
@@ -92,12 +111,24 @@ func main() {
 		fatalGUI("WinTraceLens 启动失败", fmt.Sprintf("无法初始化窗口安全令牌: %v", err))
 	}
 	if err := w.Bind("wtlWindowAction", func(token, action string) (string, error) {
-		return runWindowAction(hwnd, token, shellToken, action)
+		return runWindowAction(hwnd, token, shellToken, preferencesPath, action)
 	}); err != nil {
 		_ = srv.Shutdown(context.Background())
 		fatalGUI("WinTraceLens 启动失败", fmt.Sprintf("无法初始化窗口操作桥: %v", err))
 	}
-	shellScript, err := windowShellInitScript("http://"+listener.Addr().String(), shellToken, customFrame)
+	currentFrame := windowFrameSystem
+	if customFrame {
+		currentFrame = windowFrameIntegrated
+	}
+	shellScript, err := windowShellInitScript("http://"+listener.Addr().String(), nativeShellBootstrap{
+		Trusted:         true,
+		CustomFrame:     customFrame,
+		CurrentFrame:    currentFrame,
+		FramePreference: framePreference,
+		FrameOverride:   *systemFrame,
+		FrameReason:     frameReason,
+		Token:           shellToken,
+	})
 	if err != nil {
 		_ = srv.Shutdown(context.Background())
 		fatalGUI("WinTraceLens 启动失败", fmt.Sprintf("无法初始化窗口外观: %v", err))
