@@ -242,7 +242,7 @@
   <header>
     <h1>WinTraceLens</h1>
     <div class="app-meta">
-      <span class="release-badge" data-app-version>2.0.0</span>
+      <span class="release-badge" data-app-version>2.0.1</span>
       <span class="permission-badge unknown" data-admin-status>权限检测中</span>
       <span class="module-title">最近文件与运行痕迹</span>
     </div>
@@ -317,6 +317,7 @@
         <option value="userassist">UserAssist / PCA</option>
         <option value="powershell">PowerShell 历史</option>
 		<option value="native">Go 原生落地点</option>
+		<option value="persistence">持久化定向补采</option>
 		<option value="structure">敏感文件结构</option>
       </select>
     </div>
@@ -375,7 +376,7 @@
     }
 
     function tabMatches(item) {
-	  if (artifactSource.value === 'native') return true;
+	  if (['native','persistence'].includes(artifactSource.value)) return true;
       if (activeTab === 'modified') return item.category === '最近修改文件';
       if (activeTab === 'run') return item.category === '最近运行文件';
       if (activeTab === 'artifacts') return isArtifactRecord(item);
@@ -397,6 +398,7 @@
       if (artifactSource.value === 'userassist') return source.includes('userassist') || source.includes('pca');
       if (artifactSource.value === 'powershell') return source.includes('powershell');
       if (artifactSource.value === 'native') return source.includes('go 原生落地点');
+	  if (artifactSource.value === 'persistence') return source.includes('持久化定向补采');
 	  if (artifactSource.value === 'structure') return source.includes('敏感文件结构');
       return true;
     }
@@ -652,7 +654,7 @@
       const params = new URLSearchParams({
         max: maxRecords.value || '500',
         hours: hoursEl.value || '72',
-        category: artifactSource.value === 'native' ? 'all' : activeTab
+        category: ['native','persistence'].includes(artifactSource.value) ? 'all' : activeTab
       });
       splitRoots(modifiedRoots.value).forEach(root => params.append('root', root));
       if (amcachePath.value.trim()) params.set('amcache_path', amcachePath.value.trim());
@@ -686,6 +688,7 @@
       records = data.records || [];
       collectionErrors = data.collectionErrors || [];
       notices = data.notices || [];
+	  if(data.coverage){const c=data.coverage;notices.push(`采集覆盖：返回 ${c.returned} 条，普通列表上限 ${c.limit}；${c.limitReached?'已达到上限，可能截断':'未触及合并列表上限（不代表全量）'}。${c.sort}。记录修改时间覆盖：${c.earliest||'无'} 至 ${c.latest||'无'}。${c.boundary}`);if(c.roots?.length)notices.push(`配置扫描根目录：${c.roots.join('；')}`)}
       exportCSV.disabled = false;
       statusEl.textContent = `生成时间 ${data.generatedAt || ''}，记录 ${records.length}`;
       render();
@@ -759,7 +762,7 @@
     });
     filter.addEventListener('input', render);
     artifactSource.addEventListener('change', () => {
-	  if (artifactSource.value === 'native') activeTab = 'all';
+	  if (['native','persistence'].includes(artifactSource.value)) activeTab = 'all';
 	  else if (artifactSource.value) activeTab = 'artifacts';
       render();
     });

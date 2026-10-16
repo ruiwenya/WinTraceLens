@@ -233,7 +233,7 @@
   <header>
     <h1>WinTraceLens</h1>
     <div class="app-meta">
-      <span class="release-badge" data-app-version>2.0.0</span>
+      <span class="release-badge" data-app-version>2.0.1</span>
       <span class="permission-badge unknown" data-admin-status>权限检测中</span>
       <span class="module-title">历史通信记录</span>
     </div>
@@ -299,6 +299,7 @@
     let liveGeneratedAt = '';
     let monitorTimer = null;
     let collectionErrors = [];
+	let historyCoverage=null;
     let activeTab = 'connections';
 
     function text(value) {
@@ -423,7 +424,8 @@
       const synCount = monitorRecords.filter(x => /SYN/i.test(text(x.state))).length;
       const errors = collectionErrors.map(x => `<span class="error" title="${escapeCell(x)}">${escapeCell(x)}</span>`).join('');
       const monitorError = monitorInfo.lastError ? `<span class="error" title="${escapeCell(monitorInfo.lastError)}">短连接监测: ${escapeCell(monitorInfo.lastError)}</span>` : '';
-      meta.innerHTML = `<span>当前来源 ${sources.length}: ${escapeCell(sources.join(' / ') || '无')}</span><span class="tag info">连接历史 ${connectionCount}</span><span class="tag info">DNS 记录 ${dnsCount}</span><span class="tag ${externalCount ? 'warn' : ''}">当前公网连接 ${externalCount}</span><span class="tag info">短连接 ${monitorRecords.length}</span><span class="tag ${synCount ? 'warn' : ''}">SYN 线索 ${synCount}</span>${errors}${monitorError}`;
+      const boundary=historyCoverage&&['connections','all','dns'].includes(activeTab)?`<span class="error" style="flex-basis:100%">${escapeCell(historyCoverage.boundary)}${historyCoverage.limitReached?' 已触及每来源采集上限，可能遗漏更早记录。':''}</span>`:'';
+      meta.innerHTML = `<span>当前来源 ${sources.length}: ${escapeCell(sources.join(' / ') || '无')}</span><span class="tag info">连接历史 ${connectionCount}</span><span class="tag info">DNS 记录 ${dnsCount}</span><span class="tag ${externalCount ? 'warn' : ''}">当前公网连接 ${externalCount}</span><span class="tag info">短连接 ${monitorRecords.length}</span><span class="tag ${synCount ? 'warn' : ''}">SYN 线索 ${synCount}</span>${boundary}${errors}${monitorError}`;
     }
 
     function render() {
@@ -629,6 +631,7 @@
       const data = historyData.value;
       records = data.records || [];
       collectionErrors = data.collectionErrors || [];
+	  historyCoverage=data.coverage||null;
       if (liveData.status === 'fulfilled') {
         liveRecords = liveData.value.items || [];
         liveGeneratedAt = liveData.value.generatedAt || '';

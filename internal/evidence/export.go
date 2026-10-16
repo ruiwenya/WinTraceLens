@@ -76,6 +76,7 @@ func (s *Store) ExportSnapshot() ([]Dataset, error) {
 		func() ([]Dataset, error) { return cachedDatasets("log-health", &s.logHealth) },
 		func() ([]Dataset, error) { return cachedDatasets("registry", &s.registry) },
 		func() ([]Dataset, error) { return cachedDatasets("native-files", &s.nativeFiles) },
+		s.persistenceDatasets,
 	}
 	for _, collect := range collectors {
 		entries, err := collect()

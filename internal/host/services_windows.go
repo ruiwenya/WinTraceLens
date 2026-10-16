@@ -3,6 +3,7 @@
 package host
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -196,6 +197,7 @@ func normalizeServiceCommand(value string) string {
 	return strings.ToLower(strings.Join(strings.Fields(strings.ReplaceAll(value, `/`, `\`)), " "))
 }
 func applyServiceRisk(item *ServiceInfo, hasSCM, hasReg, hasWMI bool) {
+	item.RiskScore, item.RiskLevel, item.RiskReasons = 0, "", nil
 	add := func(points int, reason string) {
 		item.RiskScore += points
 		item.RiskReasons = append(item.RiskReasons, reason)
@@ -227,6 +229,12 @@ func applyServiceRisk(item *ServiceInfo, hasSCM, hasReg, hasWMI bool) {
 	if randomServiceName(item.Name) {
 		add(1, "服务名称疑似随机")
 	}
+	chainScore, chainReasons := persistenceChainRisk(item.ExecutionChain, true)
+	item.RiskScore += chainScore
+	item.RiskReasons = append(item.RiskReasons, chainReasons...)
+	if chainScore > 0 && isAutomaticService(item.StartMode) && (strings.EqualFold(item.Account, "LocalSystem") || strings.EqualFold(item.Account, `NT AUTHORITY\SYSTEM`)) {
+		add(2, "自动启动且使用 LocalSystem 的解释器持久化")
+	}
 	if item.RiskScore >= 8 {
 		item.RiskLevel = "高"
 	} else if item.RiskScore >= 4 {
@@ -241,7 +249,10 @@ func serviceFileStatus(path string) string {
 	}
 	info, err := os.Stat(path)
 	if err != nil {
-		return "文件不存在"
+		if errors.Is(err, os.ErrNotExist) {
+			return "文件不存在"
+		}
+		return "不可访问（未确认是否存在）"
 	}
 	if info.IsDir() {
 		return "路径为目录"
@@ -267,7 +278,7 @@ func randomServiceName(value string) bool {
 			letters++
 		} else if r >= '0' && r <= '9' {
 			digits++
-		} else {
+		} else if r != '_' && r != '-' {
 			return false
 		}
 	}

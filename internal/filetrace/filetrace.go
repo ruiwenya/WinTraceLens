@@ -1,5 +1,7 @@
 package filetrace
 
+import "github.com/ruiwenya/WinTraceLens/internal/coverage"
+
 type Options struct {
 	MaxRecords    int
 	Hours         int
@@ -9,10 +11,11 @@ type Options struct {
 }
 
 type Snapshot struct {
-	Records          []Record `json:"records"`
-	CollectionErrors []string `json:"collectionErrors"`
-	Notices          []string `json:"notices,omitempty"`
-	GeneratedAt      string   `json:"generatedAt"`
+	Coverage         *coverage.Summary `json:"coverage,omitempty"`
+	Records          []Record          `json:"records"`
+	CollectionErrors []string          `json:"collectionErrors"`
+	Notices          []string          `json:"notices,omitempty"`
+	GeneratedAt      string            `json:"generatedAt"`
 }
 
 type Record struct {

@@ -37,6 +37,52 @@ function assertOfflineAssets() {
   }
 }
 
+async function assertEvidenceLayout(page, output, name, dialogOpen) {
+  const previous = await page.evaluate(() => ({ theme: document.documentElement.dataset.theme, density: document.documentElement.dataset.density }));
+  for (const [width, height, theme, density] of [[1280, 820, 'dark', 'standard'], [960, 650, 'light', 'compact']]) {
+    await page.setViewportSize({ width, height });
+    await page.evaluate(value => Object.assign(document.documentElement.dataset, value), { theme, density });
+    const geometry = await page.evaluate(open => {
+      const wrap = document.querySelector('#table');
+      const rect = wrap.getBoundingClientRect();
+      const dialog = document.querySelector('#evidence-detail-dialog');
+      const body = dialog?.querySelector('.evidence-detail-body');
+      const close = dialog?.querySelector('[data-detail-close]');
+      const closeRect = close?.getBoundingClientRect();
+      const dialogRect = dialog?.getBoundingClientRect();
+      return {
+        pageOverflow: document.documentElement.scrollWidth - innerWidth,
+        tableOverflow: wrap.scrollWidth - wrap.clientWidth,
+        tableVisible: rect.height >= 100 && rect.bottom <= innerHeight + 1,
+        dialogContained: !open || (dialogRect.left >= 0 && dialogRect.top >= 0 && dialogRect.right <= innerWidth && dialogRect.bottom <= innerHeight),
+        bodyOverflow: !open ? 0 : body.scrollWidth - body.clientWidth,
+        closeClickable: !open || close.contains(document.elementFromPoint(closeRect.left + closeRect.width / 2, closeRect.top + closeRect.height / 2))
+      };
+    }, dialogOpen);
+    assert(geometry.pageOverflow <= 1 && geometry.tableOverflow <= 1, `${name}: ${width} has horizontal overflow`);
+    assert(geometry.tableVisible, `${name}: ${width} table is clipped`);
+    assert(geometry.dialogContained && geometry.bodyOverflow <= 1 && geometry.closeClickable, `${name}: ${width} detail is clipped`);
+    await page.screenshot({ path: path.join(output, `${name}-${width}-${theme}-${density}.png`), animations: 'disabled' });
+  }
+  await page.setViewportSize({ width: 1280, height: 820 });
+  await page.evaluate(value => Object.assign(document.documentElement.dataset, value), previous);
+}
+
+async function assertDetailContents(page, expected) {
+  const dialog = page.locator('#evidence-detail-dialog');
+  await dialog.waitFor({ state: 'visible' });
+  const contents = await dialog.locator('.evidence-detail-body').innerText();
+  for (const value of expected) assert(contents.includes(String(value)), `Detail omits ${value}`);
+  assert.equal(await dialog.locator('script, img, iframe').count(), 0, 'Evidence was interpreted as markup');
+  await page.evaluate(() => {
+    Object.defineProperty(navigator.clipboard, 'writeText', { configurable: true, value: async value => { window.__copiedEvidence = value; } });
+  });
+  await dialog.locator('[data-detail-copy]').click();
+  await page.waitForFunction(() => document.querySelector('#evidence-detail-dialog [role="status"]').textContent === '已复制完整详情');
+  const copied = await page.evaluate(() => window.__copiedEvidence);
+  for (const value of expected) assert(copied.includes(String(value)), `Copied detail omits ${value}`);
+}
+
 fs.mkdirSync(output, { recursive: true });
 assertOfflineAssets();
 const child = spawn(cliPath, ['-no-browser', '-hash-limit-mb', '16'], {
@@ -185,7 +231,7 @@ async function main() {
     sourceSummary: '深色风险色回归样例',
     collectionErrors: [],
     items: [
-      { level: '高', source: '进程', name: 'high-risk.sample', reason: '高风险样例', signature: '签名异常', path: 'C:\\Temp\\high-risk.sample' },
+      { level: '高', source: '进程', name: 'high-risk.sample', reason: '高风险样例', signature: '签名异常', signatureMsg: '需要复核发布者', md5: '0123456789abcdef0123456789abcdef', command: `cmd.exe /c start "" "C:\\Temp\\${'long-path-'.repeat(40)}payload.sample"`, extra: '<img src=x onerror=alert(1)>hidden-extra-evidence', path: 'C:\\Temp\\high-risk.sample' },
       { level: '中', source: '服务', name: 'medium-risk.sample', reason: '中风险样例', signature: '无签名请注意!!!', path: 'C:\\ProgramData\\medium-risk.sample' },
       { level: '低', source: '任务', name: 'low-risk.sample', reason: '低风险样例', signature: '已签名', path: 'C:\\Windows\\low-risk.sample' }
     ]
@@ -211,11 +257,89 @@ async function main() {
   assert.equal(focusStyle.outline, 'none', 'search focus still uses an outer outline');
   assert(!focusStyle.shadow.includes('3px'), 'search focus still uses the old blue glow');
   await page.screenshot({ path: path.join(output, 'findings-dark-muted.png') });
+  assert.equal(await page.locator('#table th').count(), 6, 'Rules table is not compact');
+  await assertEvidenceLayout(page, output, 'rules-list', false);
+  await page.locator('[data-finding-detail]').first().click();
+  const finding = findingsFixture.items[0];
+  await assertDetailContents(page, [finding.path, finding.command, finding.md5, finding.extra, finding.signatureMsg]);
+  await assertEvidenceLayout(page, output, 'rules-detail', true);
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('#evidence-detail-dialog').isVisible(), false, 'Escape did not close evidence detail');
+  assert(await page.locator('[data-finding-detail]').first().evaluate(node => node === document.activeElement), 'Detail close lost keyboard focus');
+  await page.locator('#filter').fill('re:hidden-extra-evidence');
+  assert.equal(await page.locator('#table tbody tr').count(), 1, 'Rules search ignores fields moved into detail');
+  await page.locator('#filter').fill('');
+
+  const behavior = { level: '高', scenario: '异常内存与外联', score: 85, pid: 4242, process: 'fixture.sample', path: finding.path, md5: finding.md5, signature: '签名异常', connections: 12, summary: '多信号交叉核查', evidence: '隐藏证据 hidden-behavior-evidence', related: '<script>unsafe evidence</script>' };
+  const behaviorRoute = url => new URL(url).pathname === '/api/threat/behavior';
+  await page.route(behaviorRoute, route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ generatedAt: findingsFixture.generatedAt, items: [behavior] }) }));
+  await page.locator('[data-tab="behavior"]').click();
+  await page.locator('[data-finding-detail]').waitFor();
+  assert.equal(await page.locator('#table th').count(), 6, 'Behavior table is not compact');
+  await page.locator('#filter').fill('hidden-behavior-evidence');
+  assert.equal(await page.locator('[data-finding-detail]').count(), 1, 'Behavior search ignores hidden evidence');
+  await page.locator('[data-finding-detail]').click();
+  await assertDetailContents(page, [behavior.path, behavior.md5, behavior.evidence, behavior.related, behavior.pid, behavior.score, behavior.connections]);
+  await assertEvidenceLayout(page, output, 'behavior-detail', true);
+  await page.locator('[data-detail-close]').click();
+  await page.unroute(behaviorRoute);
   await page.unroute(findingsRoute);
+
+  const caseEntity = { id: 'entity-0', kind: '服务', source: '服务多源核查', level: '高', name: 'fixture-service', value: 'hidden-case-value', pid: '4242', user: 'LAB\\analyst', hash: finding.md5, path: finding.path, remote: '192.0.2.10:445', details: finding.extra, group: '主机信息', scenarioScore: 88, scenarioReason: '自动启动并存在可疑执行链', focus: true };
+  const caseEvent = { ...caseEntity, id: 'event-0', time: '2026-10-14 10:11:12', category: '服务创建', action: '7045', entity: 'fixture-service', current: false };
+  const caseFixture = {
+    generatedAt: '2026-10-14 11:00:00', focusCount: 103,
+    entities: Array.from({ length: 103 }, (_, index) => ({ ...caseEntity, id: `entity-${index}`, name: `fixture-service-${index}`, value: `hidden-case-value-${index}` })),
+    timeline: [caseEvent], coverage: [{ source: '主机信息', status: '完成', count: 103, message: 'fixture coverage' }], collectionErrors: []
+  };
+  const investigationRoute = url => new URL(url).pathname === '/api/investigation';
+  await page.route(investigationRoute, route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(caseFixture) }));
+  await page.goto(origin + '/investigation.html', { waitUntil: 'domcontentloaded' });
+  await page.locator('[data-evidence-action="detail"]').first().waitFor();
+  assert.equal(await page.locator('#table th').count(), 6, 'Case entity table is not compact');
+  await assertEvidenceLayout(page, output, 'case-entities', false);
+  await page.locator('[data-evidence-action="detail"]').first().click();
+  await assertDetailContents(page, Object.values(caseEntity).filter(value => typeof value !== 'boolean' && value !== 'entity-0'));
+  await assertEvidenceLayout(page, output, 'case-entity-detail', true);
+  await page.locator('[data-detail-close]').click();
+  await page.locator('[data-evidence-action="pin"]').first().click();
+  await page.locator('[data-tab="bookmarks"]').click();
+  assert.equal(await page.locator('[data-evidence-action="detail"]').count(), 1, 'Bookmark was lost after compact rendering');
+  await page.locator('[data-evidence-action="detail"]').click();
+  await assertDetailContents(page, [caseEntity.hash, caseEntity.path, 'entity-0']);
+  await page.locator('[data-detail-close]').click();
+  await page.locator('[data-tab="timeline"]').click();
+  assert.equal(await page.locator('#table th').count(), 7, 'Timeline table is not compact');
+  await assertEvidenceLayout(page, output, 'case-timeline', false);
+  await page.locator('[data-evidence-action="detail"]').click();
+  await assertDetailContents(page, [caseEvent.id, caseEvent.time, caseEvent.action, caseEvent.hash, caseEvent.user, caseEvent.details]);
+  await assertEvidenceLayout(page, output, 'case-timeline-detail', true);
+  await page.locator('[data-detail-close]').click();
+  await page.locator('[data-evidence-action="pin"]').click();
+  await page.locator('[data-tab="bookmarks"]').click();
+  assert.equal(await page.locator('[data-evidence-action="detail"]').count(), 2, 'Mixed bookmark rows were lost');
+  await page.locator('[data-evidence-action="detail"]').nth(1).click();
+  await assertDetailContents(page, ['entity-0', caseEntity.value, caseEntity.hash]);
+  await page.locator('[data-detail-close]').click();
+  await page.locator('[data-tab="search"]').click();
+  await page.locator('#query').fill('re:hidden-case-value-100\\b');
+  assert.equal(await page.locator('#table tbody tr').count(), 1, 'Case search ignores fields moved into detail');
+  await page.locator('[data-evidence-action="detail"]').click();
+  await assertDetailContents(page, ['entity-100', 'hidden-case-value-100']);
+  await page.locator('[data-detail-close]').click();
+  await page.locator('[data-tab="evidence"]').click();
+  await page.locator('#query').fill('');
+  await page.locator('#next-page').click();
+  assert.equal(await page.locator('#table tbody tr').count(), 3, 'Case pagination changed');
+  await page.locator('[data-evidence-action="detail"]').first().click();
+  await assertDetailContents(page, ['entity-100', 'fixture-service-100']);
+  await page.locator('[data-detail-close]').click();
+  await page.unroute(investigationRoute);
 
   const historyFixture = {
     generatedAt: '2026-09-15 17:00:00',
     collectionErrors: [],
+    coverage: { status: 'Insufficient telemetry', boundary: '关键网络审计源不可用；不能排除历史外联。', limitReached: false },
     records: [
       { time: '2026-09-15 16:58:00', source: 'Sysmon', eventId: '3', process: 'scanner.exe', pid: '1200', proto: 'TCP', local: '10.0.0.8:50000', remote: '10.0.0.10:445', action: '允许', user: 'LAB\\analyst', details: '连接证据' },
       { time: '2026-09-15 16:59:00', source: 'Sysmon DNS', eventId: '22', process: 'scanner.exe', pid: '1200', query: 'example.test', details: 'DNS 查询证据' }
@@ -243,6 +367,7 @@ async function main() {
   await page.goto(origin + '/history.html', { waitUntil: 'domcontentloaded' });
   await page.locator('button[data-tab="dns"]').click();
   await page.locator('#table tbody tr').waitFor();
+  assert((await page.locator('#meta').innerText()).includes('不能排除历史外联'), 'Historical coverage boundary is not visible');
   assert.equal(await page.locator('#table thead th').count(), 3, 'DNS records still expose unavailable cache metadata');
   assert.equal(await page.locator('#table thead').getByText('时间', { exact: true }).count(), 0, 'DNS records still expose a misleading time column');
   assert.equal(await page.locator('#table thead').getByText('进程', { exact: true }).count(), 0, 'DNS records still expose a misleading process column');
@@ -271,6 +396,76 @@ async function main() {
   await page.unroute(historyRoute);
   await page.unroute(liveRoute);
   await page.unroute(monitorRoute);
+
+  const payload = { kind: 'file', raw: 'C:\\CustomRoot\\alpha\\agent.exe', path: 'C:\\CustomRoot\\alpha\\agent.exe', via: 'start', fileStatus: '文件不存在', signature: '', md5: '', sha256: '' };
+  const chain = { launcher: { path: 'C:\\Windows\\System32\\cmd.exe', signature: '系统文件', fileStatus: '存在' }, payloads: [payload], workingDirectory: 'C:\\CustomRoot\\alpha', asynchronous: true, warnings: [] };
+  const hostFixture = {
+    services: [{ name: 'FixtureService', displayName: '只读测试服务', command: 'cmd /c start "" "C:\\CustomRoot\\alpha\\agent.exe"', path: chain.launcher.path, fileStatus: '存在', signature: '系统文件', md5: 'launcher-only-md5', state: 'Stopped', startMode: 'Automatic', account: 'LocalSystem', sourceStatus: '三源一致', riskLevel: '高', riskScore: 14, riskReasons: ['后续目标文件缺失'], stateNotice: 'Stopped 不能判断异步子进程是否退出', executionChain: chain }],
+    scheduledTasks: [{ name: 'FixtureTask', path: '\\FixtureTask', executable: chain.launcher.path, command: 'cmd /c start "" "C:\\CustomRoot\\alpha\\agent.exe"', signature: '系统文件', riskLevel: '高', riskScore: 9, executionChain: chain }],
+    startupItems: [{ name: 'FixtureStartup', path: chain.launcher.path, command: 'cmd /c start "" "C:\\CustomRoot\\alpha\\agent.exe"', signature: '系统文件', riskLevel: '高', riskScore: 9, executionChain: chain }],
+    users: [], imageHijacks: [], wmiSubscriptions: [], collectionErrors: [],
+    targetedFiles: [{ target: payload, directoryStatus: '目录不存在', references: ['服务：FixtureService'], warnings: ['受限补采，不代表完整删除取证'] }],
+    matchedEvents: [{ serviceName: 'FixtureService', time: '2026-10-13 08:00:00', channel: 'System', eventId: '7045', recordId: '3456', xml: '<Event>完整原始事件测试</Event>' }]
+  };
+  const hostRoute = url => new URL(url).pathname === '/api/host';
+  const scriptsRoute = url => new URL(url).pathname === '/api/host/service-scripts';
+  await page.route(hostRoute, route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(hostFixture) }));
+  await page.route(scriptsRoute, route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items: [], collectionErrors: [] }) }));
+  await page.goto(origin + '/host.html', { waitUntil: 'domcontentloaded' });
+  await page.locator('.service-detail').waitFor();
+  assert((await page.locator('#table td.signature').innerText()).includes('载荷缺失'), 'System launcher signature masks the payload state');
+  assert((await page.locator('#table td.path-summary').innerText()).includes('agent.exe'), 'Service table still displays only the interpreter');
+  await page.locator('.service-detail').click();
+  await page.locator('#service-detail-dialog').waitFor({ state: 'visible' });
+  const detailText = await page.locator('#service-detail-body').innerText();
+  assert(detailText.includes('入口文件') && detailText.includes('文件不存在') && detailText.includes('Stopped 不能判断'), 'Service detail does not distinguish launcher, payload and asynchronous state');
+  assert(detailText.includes('3456'), 'Matched installation event record is missing');
+  await page.locator('#service-detail-body details summary').click();
+  assert((await page.locator('#service-detail-body pre').innerText()).includes('<Event>完整原始事件测试</Event>'), 'Original event XML was not rendered safely');
+  for (const width of [1280, 960]) {
+    await page.setViewportSize({ width, height: width === 1280 ? 820 : 650 });
+    assert(await page.locator('#service-detail-close').isVisible(), 'Close action is not visible in a small window');
+    await page.screenshot({ path: path.join(output, `host-persistence-detail-${width}.png`) });
+  }
+  await page.locator('#service-detail-close').click();
+  await page.setViewportSize({ width: 1280, height: 820 });
+  for (const tab of ['tasks', 'startup']) {
+    await page.locator(`button[data-tab="${tab}"]`).click();
+    assert((await page.locator('#table').innerText()).includes('载荷缺失'), `${tab} loses payload status`);
+    const detailButton = tab === 'tasks' ? '.task-detail' : '.startup-detail';
+    await page.locator(detailButton).click();
+    assert((await page.locator('#host-item-detail-body').innerText()).includes('后续目标 1'), `${tab} omits execution-chain details`);
+    await page.locator('#host-item-detail-close').click();
+  }
+  await page.unroute(hostRoute);
+  await page.unroute(scriptsRoute);
+
+  const tracesRoute = url => new URL(url).pathname === '/api/files/traces';
+  await page.route(tracesRoute, route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ records: [{ category: '持久化载荷', source: '持久化定向补采', name: 'agent.exe', path: payload.path, suspicion: '中', reason: '目标状态：文件不存在' }], notices: [], collectionErrors: [], coverage: { returned: 1, limit: 500, limitReached: true, sort: '按来源配额', earliest: '', latest: '', roots: ['C:\\CustomRoot'], boundary: '阴性搜索不能排除未覆盖文件' } }) }));
+  await page.goto(origin + '/filetrace.html', { waitUntil: 'domcontentloaded' });
+  await page.locator('#artifact-source').selectOption('persistence');
+  await page.locator('#table tbody tr').waitFor();
+  assert((await page.locator('#table').innerText()).includes('agent.exe'), 'Targeted persistence source cannot be selected');
+  assert((await page.locator('#operation-notices').innerText()).includes('已达到上限'), 'Trace quota boundary is not visible');
+  await page.screenshot({ path: path.join(output, 'filetrace-persistence-coverage.png') });
+  await page.unroute(tracesRoute);
+
+  if (process.env.WTL_REAL_HOST_SMOKE === '1') {
+    const actual = await page.evaluate(async () => {
+      const response = await fetch('/api/host', { cache: 'no-store' });
+      if (!response.ok) throw new Error(await response.text());
+      return response.json();
+    });
+    assert(actual.services.length > 0, 'Native host collection returned no services');
+    for (const service of actual.services) {
+      assert(service.executionChain, 'Service has no static execution-chain result');
+      if (service.executionChain.asynchronous) assert(service.stateNotice, 'Asynchronous service has no SCM state boundary');
+      for (const target of service.executionChain.payloads || []) {
+        if (target.fileStatus === '文件不存在') assert.equal(target.md5 || '', '', 'Missing payload reused the launcher hash');
+      }
+    }
+    console.log(JSON.stringify({ hostSmoke: 'passed', services: actual.services.length, tasks: actual.scheduledTasks.length, startup: actual.startupItems.length, targetedFiles: actual.targetedFiles?.length || 0, matchedEvents: actual.matchedEvents?.length || 0, warnings: actual.collectionErrors.length }));
+  }
 
   await page.route('**/api/**', route => route.fulfill({
     status: 503,

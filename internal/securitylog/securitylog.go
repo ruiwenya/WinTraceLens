@@ -4,6 +4,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ruiwenya/WinTraceLens/internal/coverage"
 	"github.com/ruiwenya/WinTraceLens/internal/winexec"
 )
 
@@ -14,9 +15,10 @@ type Options struct {
 }
 
 type Snapshot struct {
-	Events           []Event  `json:"events"`
-	CollectionErrors []string `json:"collectionErrors"`
-	GeneratedAt      string   `json:"generatedAt"`
+	Coverage         *coverage.Summary `json:"coverage,omitempty"`
+	Events           []Event           `json:"events"`
+	CollectionErrors []string          `json:"collectionErrors"`
+	GeneratedAt      string            `json:"generatedAt"`
 }
 
 type Event struct {

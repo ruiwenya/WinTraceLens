@@ -60,7 +60,7 @@ type Status struct {
 
 // GroupSource makes sub-collectors part of their user-facing evidence category.
 func GroupSource(source string) string {
-	if source == "native-files" {
+	if source == "native-files" || source == "persistence-files" {
 		return "file-traces"
 	}
 	return source
@@ -200,6 +200,14 @@ func evidenceTables(data []byte) ([]evidenceTable, []string, error) {
 				continue
 			}
 			tables = append(tables, evidenceTable{Name: key, Rows: rows})
+		}
+		if scope, ok := value["coverage"].(map[string]any); ok {
+			if boundary, ok := scope["boundary"].(string); ok && boundary != "" {
+				warnings = append(warnings, "采集覆盖："+boundary)
+			}
+			if truncated, ok := scope["possiblyTruncated"].(bool); ok && truncated {
+				warnings = append(warnings, "该数据集可能受到采集上限、时间或来源可用性的限制；阴性搜索不能排除范围外证据。")
+			}
 		}
 	}
 	return tables, warnings, nil
@@ -398,6 +406,13 @@ func BuildSelected(ctx context.Context, datasets []Dataset, version, hostname st
 			fmt.Fprintf(&summary, "%s：未采集或尚未成功，不代表未发现异常。\r\n", source.Label)
 		} else {
 			fmt.Fprintf(&summary, "%s：%d 组，%d 条，最近采集 %s\r\n", source.Label, source.Datasets, source.Rows, source.CollectedAt.UTC().Format(time.RFC3339))
+		}
+	}
+	if len(warningRows) > 0 {
+		summary.WriteString("\r\n采集覆盖与限制提示：\r\n")
+		for _, entry := range warningRows {
+			row := entry.(map[string]any)
+			fmt.Fprintf(&summary, "%s：%s\r\n", row["source"], row["warning"])
 		}
 	}
 	summary.WriteString("\r\n范围与限制：\r\n仅保全本次运行中勾选来源的已完成采集结果；ZIP 生成本身不补扫，可事先使用一键获取证据。每种采集参数保留最近成功快照，跨时间范围分组导出。\r\n数据不受当前页面关键词、分页或可见列限制；模块包含手动查看或一键采集的 PID，一键采集受进程上限与权限限制。文件痕迹包含 Go 原生落地点。\r\n后台仍在采集时，只包含已完成结果；失败提示与旧快照同时保留，不同模块不是同一时刻的系统镜像。\r\nJSON 保存完整字段，CSV 嵌套字段为 JSON 文本，已防公式注入。\r\n不包含 API Key、AI 对话、原始内存转储、可执行样本、注册表二进制原值或原始 EVTX。\r\n主机数据可能含账户、路径、命令与内网地址，请按敏感证据保管。\r\nmanifest.json 记录每组来源、参数、采集时间与文件位置；hashes.csv 校验包内所有其他文件，自身不参与哈希。哈希保证完整性，不保证源主机未被篡改。\r\n")

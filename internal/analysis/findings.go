@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/ruiwenya/WinTraceLens/internal/commandchain"
 	"github.com/ruiwenya/WinTraceLens/internal/host"
 	"github.com/ruiwenya/WinTraceLens/internal/process"
 	"github.com/ruiwenya/WinTraceLens/internal/registryanomaly"
@@ -58,6 +59,25 @@ func RegistryFindings(snapshot registryanomaly.Snapshot) []Finding {
 	return findings
 }
 
+func findingTarget(chain *commandchain.Chain, path, md5, signature, message string) commandchain.Target {
+	if chain != nil {
+		for _, t := range chain.Payloads {
+			if t.Kind == "file" && !commandchain.IsInterpreter(t.Path) {
+				return t
+			}
+		}
+	}
+	return commandchain.Target{Path: path, MD5: md5, Signature: signature, SignatureMsg: message}
+}
+
+func persistenceFinding(source, name, command string, chain *commandchain.Chain, level string, reasons []string) []Finding {
+	if level != "高" && level != "中" {
+		return nil
+	}
+	t := findingTarget(chain, "", "", "", "")
+	return []Finding{{Level: level, Source: source, Name: name, Reason: strings.Join(reasons, "；"), Path: t.Path, MD5: t.MD5, Signature: t.Signature, SignatureMsg: t.SignatureMsg, Command: command, Extra: "风险依据为完整静态执行链；入口系统签名不传递给载荷"}}
+}
+
 func BuildFindings(processes []process.Info, snapshot host.Snapshot) []Finding {
 	var findings []Finding
 
@@ -91,16 +111,18 @@ func BuildFindings(processes []process.Info, snapshot host.Snapshot) []Finding {
 		extra := fmt.Sprintf("状态: %s, 启动: %s, 账户: %s", item.State, item.StartMode, item.Account)
 		findings = append(findings, executableFindings("服务", displayName(item.Name, item.DisplayName), item.MD5, item.Signature, item.SignatureMsg, item.Path, item.Command, item.HashError, "", extra, 0)...)
 		if item.RiskLevel != "" {
+			target := findingTarget(item.ExecutionChain, item.Path, item.MD5, item.Signature, item.SignatureMsg)
 			findings = append(findings, Finding{
 				Level: item.RiskLevel, Source: "服务多源核查", Name: displayName(item.Name, item.DisplayName),
-				Reason: strings.Join(item.RiskReasons, "；"), MD5: item.MD5, Signature: item.Signature,
-				SignatureMsg: item.SignatureMsg, Path: item.Path, Command: item.Command,
+				Reason: strings.Join(item.RiskReasons, "；"), MD5: target.MD5, Signature: target.Signature,
+				SignatureMsg: target.SignatureMsg, Path: target.Path, Command: item.Command,
 				Extra: fmt.Sprintf("来源=%s；SCM=%s；注册表=%s；WMI=%s；ServiceDLL=%s", item.SourceStatus, item.SCMPath, item.RegistryImagePath, item.WMIPath, item.ServiceDLL),
 			})
 		}
 	}
 
 	for _, item := range snapshot.ScheduledTasks {
+		findings = append(findings, persistenceFinding("计划任务执行链", item.Name, item.Command+" "+item.Arguments, item.ExecutionChain, item.RiskLevel, item.RiskReasons)...)
 		if item.Executable == "" && item.MD5 == "" && item.HashError == "" && item.Signature == "" {
 			continue
 		}
@@ -110,6 +132,7 @@ func BuildFindings(processes []process.Info, snapshot host.Snapshot) []Finding {
 	}
 
 	for _, item := range snapshot.StartupItems {
+		findings = append(findings, persistenceFinding("启动项执行链", item.Name, item.Command, item.ExecutionChain, item.RiskLevel, item.RiskReasons)...)
 		extra := fmt.Sprintf("来源: %s, 位置: %s", item.Source, item.Location)
 		findings = append(findings, executableFindings("启动项", item.Name, item.MD5, item.Signature, item.SignatureMsg, item.Path, item.Command, item.HashError, "", extra, 0)...)
 	}

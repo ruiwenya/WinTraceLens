@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ruiwenya/WinTraceLens/internal/coverage"
 	"github.com/ruiwenya/WinTraceLens/internal/winexec"
 )
 
@@ -440,6 +441,28 @@ $ordered = @($events | Sort-Object @{Expression={ if ($_.Time) { $_.Time } else 
 		return Snapshot{}, err
 	}
 	snapshot.CollectionErrors = localizeErrors(snapshot.CollectionErrors)
+	covered := &coverage.Summary{Status: "Observed", Returned: len(snapshot.Events), Limit: maxRecords, LimitScope: "每条日志查询，非所有分类总数", Sort: "源查询最新优先，合并后时间降序", Warnings: append([]string(nil), snapshot.CollectionErrors...), Boundary: "日志结果受日期范围、保留时间、审计策略与每次查询配额限制；定向服务安装事件独立保存在主机信息和取证包 matchedEvents 中。"}
+	var times []string
+	counts := map[string]int{}
+	for _, event := range snapshot.Events {
+		times = append(times, event.Time)
+		counts[event.Source]++
+	}
+	for source, count := range counts {
+		covered.Sources = append(covered.Sources, source)
+		if count >= maxRecords {
+			covered.LimitReached = true
+			covered.PossiblyTruncated = true
+		}
+	}
+	covered.Earliest, covered.Latest = coverage.Times(times)
+	if len(snapshot.Events) == 0 {
+		covered.Status = "Not observed within coverage"
+		if len(snapshot.CollectionErrors) > 0 {
+			covered.Status = "Insufficient telemetry"
+		}
+	}
+	snapshot.Coverage = covered
 	return snapshot, nil
 }
 

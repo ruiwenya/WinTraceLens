@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ruiwenya/WinTraceLens/internal/analysis"
+	"github.com/ruiwenya/WinTraceLens/internal/commandchain"
 	"github.com/ruiwenya/WinTraceLens/internal/driveranalysis"
 	"github.com/ruiwenya/WinTraceLens/internal/filetrace"
 	"github.com/ruiwenya/WinTraceLens/internal/history"
@@ -353,13 +354,16 @@ func (s *Snapshot) addCoverage(source string, err error, count int, warnings []s
 
 func appendHostEntities(snapshot *Snapshot, data host.Snapshot) {
 	for _, item := range data.Services {
-		snapshot.addEntity(Entity{Kind: "服务", Source: "主机信息", Group: "主机信息", Name: first(item.DisplayName, item.Name), Value: item.Name, User: item.Account, Hash: item.MD5, Path: item.Path, Details: join(item.State, item.StartMode, item.Signature, item.Command)})
+		target := persistenceEntityTarget(item.ExecutionChain, item.Path, item.MD5)
+		snapshot.addEntity(Entity{Kind: "服务", Source: "主机信息", Group: "主机信息", Level: item.RiskLevel, Name: first(item.DisplayName, item.Name), Value: item.Name, User: item.Account, Hash: target.MD5, Path: target.Path, Details: join(item.State, item.StartMode, "入口签名="+item.Signature, "目标状态="+target.FileStatus, item.Command, item.StateNotice, strings.Join(item.RiskReasons, "；"))})
 	}
 	for _, item := range data.ScheduledTasks {
-		snapshot.addEntity(Entity{Kind: "计划任务", Source: "主机信息", Group: "主机信息", Name: item.Name, Value: item.Path, User: item.Author, Hash: item.MD5, Path: item.Executable, Details: join(item.State, item.Status, item.Signature, item.Command, item.Arguments)})
+		target := persistenceEntityTarget(item.ExecutionChain, item.Executable, item.MD5)
+		snapshot.addEntity(Entity{Kind: "计划任务", Source: "主机信息", Group: "主机信息", Level: item.RiskLevel, Name: item.Name, Value: item.Path, User: item.Author, Hash: target.MD5, Path: target.Path, Details: join(item.State, item.Status, "入口签名="+item.Signature, "目标状态="+target.FileStatus, item.Command, item.Arguments, strings.Join(item.RiskReasons, "；"))})
 	}
 	for _, item := range data.StartupItems {
-		snapshot.addEntity(Entity{Kind: "启动项", Source: item.Source, Group: "主机信息", Name: item.Name, Value: item.Location, Hash: item.MD5, Path: item.Path, Details: join(item.Signature, item.Command)})
+		target := persistenceEntityTarget(item.ExecutionChain, item.Path, item.MD5)
+		snapshot.addEntity(Entity{Kind: "启动项", Source: item.Source, Group: "主机信息", Level: item.RiskLevel, Name: item.Name, Value: item.Location, Hash: target.MD5, Path: target.Path, Details: join("入口签名="+item.Signature, "目标状态="+target.FileStatus, item.Command, strings.Join(item.RiskReasons, "；"))})
 	}
 	for _, item := range data.Users {
 		snapshot.addEntity(Entity{Kind: "本地用户", Source: "主机信息", Group: "主机信息", Name: item.Name, Value: item.SID, User: item.Name, Details: fmt.Sprintf("禁用=%t；锁定=%t；本地账户=%t", item.Disabled, item.Lockout, item.LocalAccount)})
@@ -378,6 +382,16 @@ func appendHostEntities(snapshot *Snapshot, data host.Snapshot) {
 }
 
 var connectionCountPattern = regexp.MustCompile(`连接数=(\d+)`)
+
+func persistenceEntityTarget(chain *commandchain.Chain, path, md5 string) commandchain.Target {
+	if chain != nil {
+		target := commandchain.Primary(chain)
+		if target.Path != "" {
+			return target
+		}
+	}
+	return commandchain.Target{Path: path, MD5: md5}
+}
 
 func ApplyScenario(input Snapshot, scenario string) Snapshot {
 	scenario = normalizeScenario(scenario)

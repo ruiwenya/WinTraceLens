@@ -20,6 +20,10 @@ WinTraceLens 是一款面向 Windows 应急响应和主机安全排查的本地�
 
 - 汇总 Windows 服务、计划任务、启动项、本地用户、IFEO 镜像劫持项和 WMI 永久事件订阅。
 - 展示路径、命令、账户、状态、MD5 和签名信息，便于定位持久化入口。
+- 对服务、计划任务、启动项和 WMI 命令静态展开解释器执行链，分别检查入口和后续 EXE、DLL、脚本或 URL 引用。入口系统签名不会传递给载荷；缺失、不可访问、未解析和未检查分开显示。
+- 服务风险结合命令语义、启动账户、启动类型、后续路径与签名重新评分；异步启动的服务即使显示 `Stopped` 仍需核查子进程和载荷状态。
+- 对可疑持久化目标执行有数量与时间预算的只读定向补采，保留文件元数据、SHA-256/MD5、父目录 ACL、ADS 名称及有限同目录信息。
+- 按可疑服务名定向查询 7045/4697，保存时间、RecordID、服务路径、账户和原始 XML，独立于普通事件列表配额；驱动检查引用的事件也会保留完整记录。
 - 通过原生 COM 枚举 `root\subscription` 中的过滤器、消费者和绑定关系，保留孤立对象，并对精确定时触发、8.3 短路径、用户可写路径、SID 不一致及脚本代理执行等组合信号评分。
 - 提供服务管理器、任务计划程序、系统配置启动项、本地用户和组、注册表编辑器快捷入口，方便与系统原生界面交叉核对。
 - 支持正则筛选和分表 CSV 导出。
@@ -30,6 +34,7 @@ WinTraceLens 是一款面向 Windows 应急响应和主机安全排查的本地�
 - “行为关联”把进程、持久化项、实时网络、历史日志和内存异常放在同一条线索中重新评分。
 - 对浏览器、办公软件、安全软件、WinTraceLens 自身及常见正常内存行为进行降噪。
 - 风险等级只是排查优先级，不是恶意判定结果。
+- 规则关注项与行为关联采用精简列表，完整路径、命令、哈希和关联证据通过“查看详情”查看、选择与复制；搜索和导出仍覆盖完整字段。
 
 ### 威胁分析
 
@@ -47,6 +52,7 @@ WinTraceLens 是一款面向 Windows 应急响应和主机安全排查的本地�
 - “场景重点”优先展示与当前场景相关的实体，并可从证据覆盖统计跳转到对应证据组。
 - 全局搜索支持 PID、MD5、IP、域名、用户名、进程、服务、任务和路径。
 - 支持 `/pattern/i` 与 `re:pattern` 正则筛选、分页和本次运行内的证据收藏。
+- 实体、时间线和收藏列表提供“查看详情”，集中显示场景评分、来源及完整证据，减少横向滚动。
 
 ### 文件痕迹
 
@@ -57,6 +63,8 @@ WinTraceLens 是一款面向 Windows 应急响应和主机安全排查的本地�
 - 补充 Prefetch、Recent LNK、JumpList、Shimcache、PCA、UserAssist、PowerShell PSReadLine 和 SRUM 证据。
 - 在受控落地点内检查 `desktop.ini` 结构异常，包括零字节文件、异常体积、INI 结构破坏和 ShellClassInfo 后的长尾 UTF-16 空白编码；该检查不受“最近修改”时间窗口限制。
 - 每个取证源都显示可用性和采集提示，避免把系统未启用、权限不足或记录不存在误认为程序故障。
+- “持久化定向补采”展示主机采集阶段发现的目标，即使普通文件痕迹列表达到配额仍会单独保留；可关联已采集的同路径痕迹，但不会因此宣称完成删除文件恢复。
+- 展示采集上限、可能截断、排序策略、记录时间覆盖和扫描根目录。达到上限时，未命中不能解释为文件从未存在或从未执行。
 - 所有主要列支持表头升降序排序，并提供取证源筛选、正则搜索和 CSV 导出。
 
 需要注意：当前 Prefetch 主要使用文件名和最后写入时间作为活动近似值；JumpList 主要定位容器文件；SRUM 主要定位数据库及元数据；Shimcache 为路径级启发式提取。这些来源不能单独证明文件在某个精确时间执行。
@@ -67,6 +75,7 @@ WinTraceLens 是一款面向 Windows 应急响应和主机安全排查的本地�
 - 程序运行期间每秒采样 Windows TCP 表，保留已经消失的连接、首次/最后发现时间、出现次数、采样次数和 SYN-SENT 状态。
 - 尝试读取 Sysmon 网络事件、Windows Filtering Platform 5156/5157、Windows 防火墙日志和 DNS Client 日志。
 - 补充 DNS 缓存、ARP、路由表和 netstat 快照。
+- 关键历史审计源未返回证据时醒目提示“数据源不足，不能排除历史外联”，明确区分实时快照与历史证据。
 - 支持 IP、域名、PID、进程和来源筛选，以及通配式搜索和正则搜索。
 
 Windows 默认通常不会同时启用 Sysmon、WFP 连接审计和防火墙文本日志，因此“历史通信”可能只有部分证据。DNS 缓存通常也没有可靠的查询时间和进程归属，不能单独用于恶意进程归因。短连接监测仅保留本次程序运行期间的用户态采样结果，持续时间短于采样窗口的连接仍可能漏采，不能替代 WFP、ETW、Sysmon 或抓包。
@@ -124,6 +133,8 @@ AI 分析会把用户确认的证据发送到所选在线模型服务。企业�
 
 最新正式版可从 [GitHub Releases](https://github.com/ruiwenya/WinTraceLens/releases) 下载：
 
+当前版本：`2.0.1`。本次重点改进持久化执行链核查、关联事件保全、采集范围提示，以及风险线索和案件调查详情，见 [更新日志](CHANGELOG.md)。
+
 - `WinTraceLens.exe`：桌面 GUI 版本，推荐普通用户使用。
 - `WinTraceLens-cli.exe`：启动本地 HTTP 服务并使用默认浏览器打开界面，适合调试和浏览器模式。
 
@@ -173,7 +184,7 @@ go build -trimpath -ldflags "-s -w" -o dist\WinTraceLens-cli.exe .\cmd\wintracel
 也可使用统一构建脚本：
 
 ```powershell
-.\scripts\build-release.ps1 -Version 2.0.0
+.\scripts\build-release.ps1 -Version 2.0.1
 ```
 
 ### 发布签名与 Smart App Control
@@ -184,7 +195,7 @@ go build -trimpath -ldflags "-s -w" -o dist\WinTraceLens-cli.exe .\cmd\wintracel
 
 ```powershell
 .\scripts\build-release.ps1 `
-  -Version 2.0.0 `
+  -Version 2.0.1 `
   -SignToolPath "C:\Program Files (x86)\Windows Kits\10\bin\<SDK版本>\x64\signtool.exe" `
   -CertificateThumbprint "<代码签名证书指纹>"
 ```
@@ -207,6 +218,7 @@ go build -trimpath -ldflags "-s -w" -o dist\WinTraceLens-cli.exe .\cmd\wintracel
 - Amcache、Shimcache、Prefetch、UserAssist、LNK 和 JumpList 的时间语义不同，不能统一解释为精确执行时间。
 - 日志证据完整度取决于系统版本、审计策略、日志保留时间、权限以及相关日志源是否启用。
 - 工具输出是调查线索和优先级建议，不是自动化恶意定性结论。
+- 执行链只解析命令字面量；条件分支、变量、动态拼接和脚本函数不会执行。缺少目标用户上下文时，不会用采集用户的 `%APPDATA%`/`%TEMP%` 冒充目标路径。当前补采不包含通用第三方安全日志导入、原始 EVTX/Hive 保全或完整 MFT 删除恢复。
 
 ## 安全与授权
 

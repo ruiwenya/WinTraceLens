@@ -17,6 +17,26 @@ func TestServiceReferencesFromScript(t *testing.T) {
 	}
 }
 
+func TestCaretEscapedServiceReferences(t *testing.T) {
+	values := serviceReferences("s^c st^art \"AbcDef123_XY\"")
+	if len(values) != 1 || values[0] != "AbcDef123_XY" {
+		t.Fatalf("escaped service reference lost: %#v", values)
+	}
+}
+
+func TestNativeScannerIncludesFilesDirectlyInRoot(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SystemRoot", dir)
+	path := filepath.Join(dir, "audit.cmd")
+	if err := os.WriteFile(path, []byte("s^c st^art ExampleAuditService"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	items, _ := collectNativeLandingFiles(Options{Hours: 72}, 1)
+	if len(items) != 1 || items[0].Path != path {
+		t.Fatalf("direct root script was not inspected: %+v", items)
+	}
+}
+
 func TestHiddenPEIsReported(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "update.tmp")

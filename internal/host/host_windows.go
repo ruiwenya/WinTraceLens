@@ -47,12 +47,13 @@ type psStartupItem struct {
 }
 
 type psTask struct {
-	Name    string `json:"Name"`
-	Path    string `json:"Path"`
-	State   string `json:"State"`
-	Status  string `json:"Status"`
-	Author  string `json:"Author"`
-	Command string `json:"Command"`
+	WorkingDirectory string `json:"WorkingDirectory"`
+	Name             string `json:"Name"`
+	Path             string `json:"Path"`
+	State            string `json:"State"`
+	Status           string `json:"Status"`
+	Author           string `json:"Author"`
+	Command          string `json:"Command"`
 }
 
 type psImageHijack struct {
@@ -67,8 +68,9 @@ type taskXML struct {
 	} `xml:"RegistrationInfo"`
 	Actions struct {
 		Exec []struct {
-			Command   string `xml:"Command"`
-			Arguments string `xml:"Arguments"`
+			Command          string `xml:"Command"`
+			Arguments        string `xml:"Arguments"`
+			WorkingDirectory string `xml:"WorkingDirectory"`
 		} `xml:"Exec"`
 	} `xml:"Actions"`
 }
@@ -82,7 +84,6 @@ func Collect(opts Options) (Snapshot, error) {
 		snapshot.CollectionErrors = append(snapshot.CollectionErrors, "PowerShell: "+err.Error())
 	} else {
 		wmiServices = psData.Services
-		snapshot.ScheduledTasks = tasksFromPS(psData.ScheduledTasks, opts)
 		snapshot.Users = psData.Users
 		snapshot.StartupItems = append(snapshot.StartupItems, startupFromPS(psData.StartupRegistry, opts)...)
 		snapshot.StartupItems = append(snapshot.StartupItems, startupFromPS(psData.StartupFolders, opts)...)
@@ -99,7 +100,26 @@ func Collect(opts Options) (Snapshot, error) {
 	}
 	snapshot.Services = mergeServiceSources(wmiServices, scmServices, registryServices, opts)
 
-	if len(snapshot.ScheduledTasks) == 0 {
+	comTasks, comTaskErr := collectScheduledTasksCOM(opts)
+	if comTaskErr == nil && len(comTasks) > 0 {
+		snapshot.ScheduledTasks = comTasks
+		seen := make(map[string]bool)
+		for _, task := range comTasks {
+			seen[strings.ToLower(task.Path)] = true
+		}
+		var missing []psTask
+		for _, task := range psData.ScheduledTasks {
+			if !seen[strings.ToLower(task.Path)] {
+				missing = append(missing, task)
+			}
+		}
+		snapshot.ScheduledTasks = append(snapshot.ScheduledTasks, tasksFromPS(missing, opts)...)
+	} else if len(psData.ScheduledTasks) > 0 {
+		snapshot.ScheduledTasks = tasksFromPS(psData.ScheduledTasks, opts)
+		if comTaskErr != nil {
+			snapshot.CollectionErrors = append(snapshot.CollectionErrors, "任务 COM 采集不可用，CSV 回退可能缺少工作目录；相对路径会标为未解析。")
+		}
+	} else {
 		tasks, err := collectScheduledTasks(opts)
 		if err != nil {
 			snapshot.CollectionErrors = append(snapshot.CollectionErrors, "Scheduled tasks: "+err.Error())
@@ -111,6 +131,7 @@ func Collect(opts Options) (Snapshot, error) {
 	wmiSubscriptions, wmiWarnings := collectWMISubscriptions(snapshot.Services, snapshot.ScheduledTasks, opts)
 	snapshot.WMISubscriptions = wmiSubscriptions
 	snapshot.CollectionErrors = append(snapshot.CollectionErrors, wmiWarnings...)
+	enrichPersistence(&snapshot, opts)
 
 	sort.Slice(snapshot.Services, func(i, j int) bool {
 		return strings.ToLower(snapshot.Services[i].Name) < strings.ToLower(snapshot.Services[j].Name)
@@ -280,17 +301,18 @@ func tasksFromPS(items []psTask, opts Options) []ScheduledTaskInfo {
 		path := executablePathFromCommand(item.Command)
 		md5, hashErr, sig := enrichExecutable(path, opts)
 		out = append(out, ScheduledTaskInfo{
-			Name:         item.Name,
-			Path:         item.Path,
-			State:        item.State,
-			Status:       item.Status,
-			Author:       item.Author,
-			Command:      item.Command,
-			Executable:   path,
-			MD5:          md5,
-			Signature:    sig.Status,
-			SignatureMsg: sig.Message,
-			HashError:    hashErr,
+			Name:             item.Name,
+			Path:             item.Path,
+			State:            item.State,
+			Status:           item.Status,
+			Author:           item.Author,
+			WorkingDirectory: item.WorkingDirectory,
+			Command:          item.Command,
+			Executable:       path,
+			MD5:              md5,
+			Signature:        sig.Status,
+			SignatureMsg:     sig.Message,
+			HashError:        hashErr,
 		})
 	}
 	return out
@@ -354,7 +376,7 @@ function Convert-TaskState($state) {
   switch ($state) { 0 {'Unknown'} 1 {'Disabled'} 2 {'Queued'} 3 {'Ready'} 4 {'Running'} default {[string]$state} }
 }
 function Walk-Folder($folder) {
-  foreach ($task in @($folder.GetTasks(0))) {
+  foreach ($task in @($folder.GetTasks(1))) {
     foreach ($action in @($task.Definition.Actions)) {
       if ($action.Type -eq 0) {
         [pscustomobject]@{
@@ -364,6 +386,7 @@ function Walk-Folder($folder) {
           Status=(Convert-TaskState $task.State)
           Author=$task.Definition.RegistrationInfo.Author
           Command=(($action.Path + ' ' + $action.Arguments).Trim())
+          WorkingDirectory=[string]$action.WorkingDirectory
         }
       }
     }
@@ -540,18 +563,19 @@ func parseScheduledTask(root, path string, opts Options) (ScheduledTaskInfo, err
 	md5, hashErr, sig := enrichExecutable(executable, opts)
 
 	return ScheduledTaskInfo{
-		Name:         filepath.Base(path),
-		Path:         taskPath,
-		State:        "",
-		Status:       "",
-		Author:       task.RegistrationInfo.Author,
-		Command:      execAction.Command,
-		Arguments:    execAction.Arguments,
-		Executable:   executable,
-		MD5:          md5,
-		Signature:    sig.Status,
-		SignatureMsg: sig.Message,
-		HashError:    hashErr,
+		Name:             filepath.Base(path),
+		Path:             taskPath,
+		State:            "",
+		Status:           "",
+		Author:           task.RegistrationInfo.Author,
+		Command:          execAction.Command,
+		Arguments:        execAction.Arguments,
+		WorkingDirectory: execAction.WorkingDirectory,
+		Executable:       executable,
+		MD5:              md5,
+		Signature:        sig.Status,
+		SignatureMsg:     sig.Message,
+		HashError:        hashErr,
 	}, nil
 }
 

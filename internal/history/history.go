@@ -1,6 +1,9 @@
 package history
 
-import "time"
+import (
+	"github.com/ruiwenya/WinTraceLens/internal/coverage"
+	"time"
+)
 
 type Options struct {
 	MaxRecords int
@@ -9,9 +12,10 @@ type Options struct {
 }
 
 type Snapshot struct {
-	Records          []Record `json:"records"`
-	CollectionErrors []string `json:"collectionErrors"`
-	GeneratedAt      string   `json:"generatedAt"`
+	Coverage         *coverage.Summary `json:"coverage,omitempty"`
+	Records          []Record          `json:"records"`
+	CollectionErrors []string          `json:"collectionErrors"`
+	GeneratedAt      string            `json:"generatedAt"`
 }
 
 type Record struct {

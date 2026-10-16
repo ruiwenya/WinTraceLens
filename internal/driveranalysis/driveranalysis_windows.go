@@ -200,6 +200,16 @@ function Data-Summary($data) {
 function Add-DriverEvent($source, $event, $data, $serviceName, $imagePath, $account, $details) {
   $events.Add([pscustomobject]@{
     Time=$event.TimeCreated.ToString('yyyy-MM-dd HH:mm:ss')
+    TimeUTC=$event.TimeCreated.ToUniversalTime().ToString('o')
+    RecordID=[string]$event.RecordId
+    Provider=[string]$event.ProviderName
+    Channel=[string]$event.LogName
+    Computer=[string]$event.MachineName
+    ServiceType=(First-Value $data @('ServiceType','param3'))
+    StartType=(First-Value $data @('StartType','ServiceStartType','param4'))
+    SubjectSID=(First-Value $data @('SubjectUserSid'))
+    Message=[string]$event.Message
+    XML=[string]$event.ToXml()
     Source=[string]$source
     EventID=[string]$event.Id
     ServiceName=(Clean-Value $serviceName)
@@ -249,7 +259,7 @@ try {
 }
 
 [pscustomobject]@{
-  Events=@($events | Sort-Object Time -Descending | Select-Object -First $max)
+  Events=@($events | Sort-Object Time -Descending)
   CollectionErrors=@($errors)
 } | ConvertTo-Json -Compress -Depth 5
 `, max)
@@ -272,6 +282,15 @@ try {
 	var snapshot driverEventSnapshot
 	if err := json.Unmarshal(data, &snapshot); err != nil {
 		return nil, []string{"驱动事件日志 JSON 解析失败: " + err.Error()}
+	}
+	counts := map[string]int{}
+	for _, event := range snapshot.Events {
+		counts[event.Source]++
+	}
+	for source, count := range counts {
+		if count >= max {
+			snapshot.CollectionErrors = append(snapshot.CollectionErrors, fmt.Sprintf("%s 达到每来源 %d 条采集上限，最早事件可能未覆盖。", source, max))
+		}
 	}
 	return snapshot.Events, localizeDriverEventErrors(snapshot.CollectionErrors)
 }

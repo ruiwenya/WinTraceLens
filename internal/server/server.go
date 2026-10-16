@@ -41,6 +41,14 @@ type Options struct {
 	Version        string
 }
 
+func jsonText(value any) string {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
 type Server struct {
 	options            Options
 	accessToken        string
@@ -195,33 +203,36 @@ func (s *Server) handleHostCSV(w http.ResponseWriter, r *http.Request) {
 				item.MD5, item.Signature, item.SignatureMsg, item.Path, item.FileStatus, item.Command,
 				item.SCMPath, item.RegistryImagePath, item.WMIPath, item.RegistryPath, item.ServiceDLL,
 				item.ServiceDLLSignature, item.ServiceDLLSigMsg, item.HashError,
+				jsonText(item.ExecutionChain), item.StateNotice,
 			}
 			if matchesCSVQuery(q, row) {
 				rows = append(rows, row)
 			}
 		}
-		writeCSV(w, "host-services", []string{"风险", "评分", "风险原因", "来源状态", "服务名", "显示名", "状态", "启动", "账户", "MD5", "签名", "签名说明", "路径", "文件状态", "命令", "SCM路径", "注册表ImagePath", "WMI PathName", "注册表项", "ServiceDLL", "ServiceDLL签名", "ServiceDLL签名说明", "错误"}, rows)
+		writeCSV(w, "host-services", []string{"风险", "评分", "风险原因", "来源状态", "服务名", "显示名", "状态", "启动", "账户", "入口MD5", "入口签名", "入口签名说明", "入口路径", "入口文件状态", "命令", "SCM路径", "注册表ImagePath", "WMI PathName", "注册表项", "ServiceDLL", "ServiceDLL签名", "ServiceDLL签名说明", "错误", "执行链JSON", "状态说明"}, rows)
 	case "tasks":
 		rows := make([][]string, 0, len(snapshot.ScheduledTasks))
 		for _, item := range snapshot.ScheduledTasks {
 			row := []string{
 				item.Name, item.Path, item.State, item.Status, item.Author,
 				item.MD5, item.Signature, item.SignatureMsg, item.Executable, item.Command, item.Arguments, item.HashError,
+				item.RiskLevel, strconv.Itoa(item.RiskScore), strings.Join(item.RiskReasons, "；"), jsonText(item.ExecutionChain),
 			}
 			if matchesCSVQuery(q, row) {
 				rows = append(rows, row)
 			}
 		}
-		writeCSV(w, "host-tasks", []string{"任务名", "任务路径", "状态", "运行状态", "作者", "MD5", "签名", "签名说明", "可执行路径", "命令", "参数", "错误"}, rows)
+		writeCSV(w, "host-tasks", []string{"任务名", "任务路径", "状态", "运行状态", "作者", "入口MD5", "入口签名", "入口签名说明", "入口路径", "命令", "参数", "错误", "风险", "评分", "风险原因", "执行链JSON"}, rows)
 	case "startup":
 		rows := make([][]string, 0, len(snapshot.StartupItems))
 		for _, item := range snapshot.StartupItems {
 			row := []string{item.Source, item.Name, item.MD5, item.Signature, item.SignatureMsg, item.Path, item.Command, item.Location, item.HashError}
+			row = append(row, item.RiskLevel, strconv.Itoa(item.RiskScore), strings.Join(item.RiskReasons, "；"), jsonText(item.ExecutionChain))
 			if matchesCSVQuery(q, row) {
 				rows = append(rows, row)
 			}
 		}
-		writeCSV(w, "host-startup", []string{"来源", "名称", "MD5", "签名", "签名说明", "路径", "命令", "位置", "错误"}, rows)
+		writeCSV(w, "host-startup", []string{"来源", "名称", "入口MD5", "入口签名", "入口签名说明", "入口路径", "命令", "位置", "错误", "风险", "评分", "风险原因", "执行链JSON"}, rows)
 	case "users":
 		rows := make([][]string, 0, len(snapshot.Users))
 		for _, item := range snapshot.Users {
@@ -1659,6 +1670,8 @@ func fileTraceSourceMatches(item filetrace.Record, source string) bool {
 		return strings.Contains(value, "powershell")
 	case "native":
 		return strings.Contains(value, "go 原生落地点")
+	case "persistence":
+		return strings.Contains(value, "持久化定向补采")
 	case "structure":
 		return strings.Contains(value, "敏感文件结构")
 	default:

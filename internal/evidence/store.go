@@ -6,6 +6,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ruiwenya/WinTraceLens/internal/commandchain"
+	"github.com/ruiwenya/WinTraceLens/internal/coverage"
 	"github.com/ruiwenya/WinTraceLens/internal/driveranalysis"
 	"github.com/ruiwenya/WinTraceLens/internal/filetrace"
 	"github.com/ruiwenya/WinTraceLens/internal/history"
@@ -108,9 +110,12 @@ func (s *Store) Host(opts host.Options, force bool) (host.Snapshot, error) {
 }
 
 func (s *Store) FileTraces(opts filetrace.Options, force bool) (filetrace.Snapshot, error) {
-	return s.fileTraces.get(cacheKey(opts), force, fileTraceTTL, func() (filetrace.Snapshot, error) {
-		return filetrace.Collect(opts)
-	}, cloneFileTrace)
+	snapshot, err := s.fileTraces.get(cacheKey(opts), force, fileTraceTTL, func() (filetrace.Snapshot, error) { return filetrace.Collect(opts) }, cloneFileTrace)
+	if err != nil {
+		return snapshot, err
+	}
+	machine, _ := s.latestPersistence()
+	return appendPersistenceTraces(snapshot, machine), nil
 }
 
 func (s *Store) History(opts history.Options, force bool) (history.Snapshot, error) {
@@ -177,40 +182,63 @@ func cloneHost(value host.Snapshot) host.Snapshot {
 	value.Services = append([]host.ServiceInfo(nil), value.Services...)
 	for i := range value.Services {
 		value.Services[i].RiskReasons = append([]string(nil), value.Services[i].RiskReasons...)
+		value.Services[i].ExecutionChain = commandchain.Clone(value.Services[i].ExecutionChain)
 	}
 	value.ScheduledTasks = append([]host.ScheduledTaskInfo(nil), value.ScheduledTasks...)
+	for i := range value.ScheduledTasks {
+		value.ScheduledTasks[i].ExecutionChain = commandchain.Clone(value.ScheduledTasks[i].ExecutionChain)
+		value.ScheduledTasks[i].RiskReasons = append([]string(nil), value.ScheduledTasks[i].RiskReasons...)
+	}
 	value.StartupItems = append([]host.StartupItem(nil), value.StartupItems...)
+	for i := range value.StartupItems {
+		value.StartupItems[i].ExecutionChain = commandchain.Clone(value.StartupItems[i].ExecutionChain)
+		value.StartupItems[i].RiskReasons = append([]string(nil), value.StartupItems[i].RiskReasons...)
+	}
 	value.Users = append([]host.UserInfo(nil), value.Users...)
 	value.ImageHijacks = append([]host.ImageHijackInfo(nil), value.ImageHijacks...)
 	value.WMISubscriptions = append([]host.WMISubscription(nil), value.WMISubscriptions...)
 	for i := range value.WMISubscriptions {
+		value.WMISubscriptions[i].ExecutionChain = commandchain.Clone(value.WMISubscriptions[i].ExecutionChain)
 		value.WMISubscriptions[i].RiskReasons = append([]string(nil), value.WMISubscriptions[i].RiskReasons...)
 		value.WMISubscriptions[i].RelatedServices = append([]string(nil), value.WMISubscriptions[i].RelatedServices...)
 		value.WMISubscriptions[i].RelatedTasks = append([]string(nil), value.WMISubscriptions[i].RelatedTasks...)
 	}
+	value.TargetedFiles = append([]host.TargetedFile(nil), value.TargetedFiles...)
+	for i := range value.TargetedFiles {
+		t := &value.TargetedFiles[i]
+		t.References = append([]string(nil), t.References...)
+		t.Streams = append([]string(nil), t.Streams...)
+		t.Warnings = append([]string(nil), t.Warnings...)
+		t.NearbyFiles = append([]commandchain.Target(nil), t.NearbyFiles...)
+	}
+	value.MatchedEvents = append(value.MatchedEvents[:0:0], value.MatchedEvents...)
 	value.CollectionErrors = append([]string(nil), value.CollectionErrors...)
 	return value
 }
 
 func cloneFileTrace(value filetrace.Snapshot) filetrace.Snapshot {
+	value.Coverage = coverage.Clone(value.Coverage)
 	value.Records = append([]filetrace.Record(nil), value.Records...)
 	value.CollectionErrors = append([]string(nil), value.CollectionErrors...)
 	return value
 }
 
 func cloneHistory(value history.Snapshot) history.Snapshot {
+	value.Coverage = coverage.Clone(value.Coverage)
 	value.Records = append([]history.Record(nil), value.Records...)
 	value.CollectionErrors = append([]string(nil), value.CollectionErrors...)
 	return value
 }
 
 func cloneSecurity(value securitylog.Snapshot) securitylog.Snapshot {
+	value.Coverage = coverage.Clone(value.Coverage)
 	value.Events = append([]securitylog.Event(nil), value.Events...)
 	value.CollectionErrors = append([]string(nil), value.CollectionErrors...)
 	return value
 }
 
 func cloneDrivers(value driveranalysis.Snapshot) driveranalysis.Snapshot {
+	value.MatchedEvents = append(value.MatchedEvents[:0:0], value.MatchedEvents...)
 	value.Items = append([]driveranalysis.Item(nil), value.Items...)
 	value.Checks = append([]driveranalysis.SourceCheck(nil), value.Checks...)
 	for i := range value.Checks {

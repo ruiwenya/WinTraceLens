@@ -281,6 +281,7 @@ $ordered = @($ordered | Sort-Object @{Expression={ if ($_.Time) { $_.Time } else
 		return Snapshot{}, err
 	}
 	snapshot.CollectionErrors = localizeHistoryErrors(snapshot.CollectionErrors)
+	snapshot.Coverage = historyCoverage(snapshot, maxRecords)
 	return snapshot, nil
 }
 

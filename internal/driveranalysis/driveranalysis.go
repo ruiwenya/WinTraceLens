@@ -11,6 +11,7 @@ import (
 
 	amcachedata "github.com/ruiwenya/WinTraceLens/internal/amcache"
 	"github.com/ruiwenya/WinTraceLens/internal/process"
+	"github.com/ruiwenya/WinTraceLens/internal/securitylog"
 )
 
 type Options struct {
@@ -20,13 +21,14 @@ type Options struct {
 }
 
 type Snapshot struct {
-	Items            []Item        `json:"items"`
-	Checks           []SourceCheck `json:"checks"`
-	CollectionErrors []string      `json:"collectionErrors"`
-	GeneratedAt      string        `json:"generatedAt"`
-	SourceSummary    string        `json:"sourceSummary"`
-	Boundary         string        `json:"boundary"`
-	SourceCounts     SourceCounts  `json:"sourceCounts"`
+	MatchedEvents    []securitylog.PreservedEvent `json:"matchedEvents,omitempty"`
+	Items            []Item                       `json:"items"`
+	Checks           []SourceCheck                `json:"checks"`
+	CollectionErrors []string                     `json:"collectionErrors"`
+	GeneratedAt      string                       `json:"generatedAt"`
+	SourceSummary    string                       `json:"sourceSummary"`
+	Boundary         string                       `json:"boundary"`
+	SourceCounts     SourceCounts                 `json:"sourceCounts"`
 }
 
 type SourceCounts struct {
@@ -95,15 +97,7 @@ type serviceEntry struct {
 	RegistryPath  string
 }
 
-type eventEntry struct {
-	Time        string
-	Source      string
-	EventID     string
-	ServiceName string
-	ImagePath   string
-	Account     string
-	Details     string
-}
+type eventEntry = securitylog.PreservedEvent
 
 type analysisContext struct {
 	services       []serviceEntry
@@ -135,6 +129,7 @@ func Collect(opts Options) (Snapshot, error) {
 		snapshot.CollectionErrors = append(snapshot.CollectionErrors, "驱动服务注册表: "+err.Error())
 	}
 	events, eventErrors := collectDriverEvents(800)
+	snapshot.MatchedEvents = events
 	snapshot.CollectionErrors = append(snapshot.CollectionErrors, eventErrors...)
 	files, err := collectDriverFiles()
 	if err != nil {

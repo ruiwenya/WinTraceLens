@@ -137,7 +137,7 @@
     }
     table {
       width: 100%;
-      min-width: 1760px;
+      min-width: 0;
       border-collapse: collapse;
       table-layout: fixed;
     }
@@ -158,18 +158,18 @@
       font-weight: 650;
     }
     tbody tr:hover td { background: #f3f8ff; }
-    .level { width: 78px; }
-    .source { width: 100px; }
-    .name { width: 220px; }
-    .reason { width: 250px; }
-    .md5 {
-      width: 270px;
-      font-family: Consolas, "Courier New", monospace;
+    .level { width: 60px; }
+    .source { width: 104px; }
+    .name { width: 24%; }
+    .pid { width: 72px; }
+    .signature { width: 126px; }
+    .detail-action { width: 100px; }
+    button.row-detail { height: 28px; padding: 0 9px; }
+    @media (max-width: 700px) {
+      .signature { display: none; }
+      .source { width: 80px; }
+      .detail-action { width: 90px; }
     }
-    .signature { width: 150px; }
-    .path { width: 390px; }
-    .command { width: 390px; }
-    .extra { width: 360px; }
     .pill {
       display: inline-flex;
       align-items: center;
@@ -212,14 +212,16 @@
   <link rel="stylesheet" href="/nav.css">
   <link rel="stylesheet" href="/theme.css">
   <link rel="stylesheet" href="/tables.css">
+  <link rel="stylesheet" href="/evidence-detail.css">
   <script src="/app.js"></script>
+  <script src="/evidence-detail.js"></script>
   <script src="/ui-preferences.js" defer></script>
 </head>
 <body>
   <header>
     <h1>WinTraceLens</h1>
     <div class="app-meta">
-      <span class="release-badge" data-app-version>2.0.0</span>
+      <span class="release-badge" data-app-version>2.0.1</span>
       <span class="permission-badge unknown" data-admin-status>权限检测中</span>
       <span class="module-title">规则关注项与行为关联风险线索</span>
     </div>
@@ -270,6 +272,7 @@
     let generatedAt = '';
     let sourceSummary = '';
     let collectionErrors = [];
+    let displayedItems = [];
 
     function text(value) {
       return value == null ? '' : String(value);
@@ -327,24 +330,21 @@
         return;
       }
       table.innerHTML = `<table><thead><tr>
-        <th class="level">级别</th><th class="source">场景</th><th class="level">评分</th><th class="level">PID</th>
-        <th class="name">进程/来源</th><th class="level">连接</th><th class="signature">签名</th><th class="path">路径</th>
-        <th class="reason">摘要</th><th class="extra">证据</th><th class="extra">关联信号</th>
-      </tr></thead><tbody>${items.map(x => `<tr>
+        <th class="level">级别</th><th class="source">场景</th><th class="name">进程/来源</th>
+        <th class="pid">PID</th><th>关联摘要</th><th class="detail-action">详情</th>
+      </tr></thead><tbody>${items.map((x, index) => `<tr>
         <td class="level"><span class="pill ${levelClass(x.level)}">${escapeCell(x.level)}</span></td>
         <td class="source" title="${escapeCell(x.scenario)}">${escapeCell(x.scenario)}</td>
-        <td class="level">${escapeCell(x.score)}</td><td class="level">${escapeCell(x.pid || '')}</td>
-        <td class="name" title="${escapeCell(x.process)}">${escapeCell(x.process)}</td><td class="level">${escapeCell(x.connections || 0)}</td>
-        <td class="signature" title="${escapeCell(x.signature)}">${escapeCell(x.signature)}</td>
-        <td class="path" title="${escapeCell(x.path)}">${escapeCell(x.path)}</td>
+        <td class="name" title="${escapeCell(x.process)}">${escapeCell(x.process)}</td>
+        <td class="pid">${escapeCell(x.pid || '')}</td>
         <td class="reason" title="${escapeCell(x.summary)}">${escapeCell(x.summary)}</td>
-        <td class="extra" title="${escapeCell(x.evidence)}">${escapeCell(x.evidence)}</td>
-        <td class="extra" title="${escapeCell(x.related)}">${escapeCell(x.related)}</td>
+        <td class="detail-action"><button class="row-detail" data-finding-detail="${index}">查看详情</button></td>
       </tr>`).join('')}</tbody></table>`;
     }
 
     function render() {
       const items = visibleItems();
+      displayedItems = items;
       document.querySelectorAll('button.tab').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === activeTab));
       filter.placeholder = activeTab === 'behavior'
         ? '按级别、场景、进程、PID、路径或关联信号过滤；支持 /正则/i'
@@ -362,19 +362,36 @@
       }
       table.innerHTML = `<table><thead><tr>
         <th class="level">级别</th><th class="source">来源</th><th class="name">名称</th><th class="reason">原因</th>
-        <th class="md5">MD5</th><th class="signature">签名</th><th class="path">路径</th><th class="command">命令</th><th class="extra">补充信息</th>
-      </tr></thead><tbody>${items.map(x => `<tr>
+        <th class="signature">签名</th><th class="detail-action">详情</th>
+      </tr></thead><tbody>${items.map((x, index) => `<tr>
         <td class="level"><span class="pill ${levelClass(x.level)}">${escapeCell(x.level)}</span></td>
         <td class="source" title="${escapeCell(x.source)}">${escapeCell(x.source)}</td>
         <td class="name" title="${escapeCell(x.name)}">${escapeCell(x.name)}</td>
         <td class="reason" title="${escapeCell(x.reason)}">${escapeCell(x.reason)}</td>
-        <td class="md5" title="${escapeCell(x.md5)}">${escapeCell(x.md5)}</td>
         <td class="signature">${renderSignature(x.signature, x.signatureMsg)}</td>
-        <td class="path" title="${escapeCell(x.path)}">${escapeCell(x.path)}</td>
-        <td class="command" title="${escapeCell(x.command)}">${escapeCell(x.command)}</td>
-        <td class="extra" title="${escapeCell(x.extra)}">${escapeCell(x.extra)}</td>
+        <td class="detail-action"><button class="row-detail" data-finding-detail="${index}">查看详情</button></td>
       </tr>`).join('')}</tbody></table>`;
     }
+
+    table.addEventListener('click', event => {
+      const button = event.target.closest('button[data-finding-detail]');
+      if (!button) return;
+      const item = displayedItems[Number(button.dataset.findingDetail)];
+      if (!item) return;
+      if (activeTab === 'behavior') {
+        window.wtlShowEvidenceDetail('行为关联详情', [
+          { title: '风险判断', fields: [['级别', item.level], ['场景', item.scenario], ['评分', item.score], ['摘要', item.summary]] },
+          { title: '关联对象', fields: [['进程/来源', item.process], ['PID', item.pid || ''], ['连接数', item.connections], ['签名', item.signature], ['路径', item.path], ['MD5', item.md5]] },
+          { title: '关联证据', fields: [['证据', item.evidence], ['关联信号', item.related], ['分析时间', generatedAt]] }
+        ]);
+      } else {
+        window.wtlShowEvidenceDetail('规则关注项详情', [
+          { title: '风险判断', fields: [['级别', item.level], ['来源', item.source], ['名称', item.name], ['原因', item.reason]] },
+          { title: '文件与执行信息', fields: [['路径', item.path], ['命令', item.command], ['MD5', item.md5], ['签名', item.signature], ['签名说明', item.signatureMsg]] },
+          { title: '补充证据', fields: [['补充信息', item.extra], ['分析时间', generatedAt]] }
+        ]);
+      }
+    });
 
     async function loadJSON(url, options) {
       const res = await fetch(url, options || { cache: 'no-store' });

@@ -41,7 +41,7 @@
     h1 { margin: 0; font-size: 18px; font-weight: 650; }
     main {
       display: grid;
-      grid-template-rows: auto auto auto auto minmax(280px, 1fr);
+      grid-template-rows: auto auto auto auto minmax(0, 1fr);
       gap: 10px;
       height: calc(100vh - 48px);
       min-height: 680px;
@@ -132,7 +132,7 @@
     .coverage button.badge.active { box-shadow: inset 0 0 0 2px var(--accent); }
     .panel {
       min-width: 0;
-      min-height: 280px;
+      min-height: 0;
       height: 100%;
       border: 1px solid var(--line);
       border-radius: 6px;
@@ -142,7 +142,7 @@
     .table-wrap { height: 100%; min-height: 0; overflow: auto; }
     table {
       width: 100%;
-      min-width: 1900px;
+      min-width: 0;
       border-collapse: collapse;
       table-layout: fixed;
     }
@@ -165,34 +165,37 @@
     tbody tr:hover td { background: #f3f8ff; }
     tbody tr.high td { background: #fff0f2; }
     tbody tr.medium td { background: #fff9ed; }
-    .action { width: 70px; }
+    .action { width: 64px; }
+    .detail-action { width: 100px; }
     .time { width: 155px; }
-    .level { width: 80px; }
-    .score { width: 82px; }
-    .scenario { width: 260px; }
-    .group { width: 150px; }
-    .source { width: 160px; }
-    .category { width: 150px; }
-    .entity { width: 210px; }
-    .pid { width: 80px; }
-    .user { width: 160px; }
-    .remote { width: 190px; }
-    .path { width: 400px; }
-    .details { width: 420px; }
+    .level { width: 60px; }
+    .source { width: 140px; }
+    .entity { width: 24%; }
+    .source-kind { display: block; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+    button.row-detail { height: 28px; padding: 0 9px; }
+    button.pin[aria-pressed="true"] { background: var(--wtl-row-selected); color: var(--wtl-accent-strong); }
+    @media (max-width: 760px) {
+      .time { width: 110px; }
+      .source { width: 100px; }
+      .entity { width: 22%; }
+      .detail-action { width: 90px; }
+    }
     .empty { padding: 18px; color: var(--muted); }
     .bad-text { color: var(--bad); }
   </style>
   <link rel="stylesheet" href="/nav.css">
   <link rel="stylesheet" href="/theme.css">
   <link rel="stylesheet" href="/tables.css">
+  <link rel="stylesheet" href="/evidence-detail.css">
   <script src="/app.js"></script>
+  <script src="/evidence-detail.js"></script>
   <script src="/ui-preferences.js" defer></script>
 </head>
 <body>
   <header>
     <h1>WinTraceLens</h1>
     <div class="app-meta">
-      <span class="release-badge" data-app-version>2.0.0</span>
+      <span class="release-badge" data-app-version>2.0.1</span>
       <span class="permission-badge unknown" data-admin-status>权限检测中</span>
       <span class="module-title">案件时间线与全局实体搜索</span>
     </div>
@@ -288,6 +291,7 @@
     const pageSize = 100;
     let snapshot = { timeline: [], entities: [], coverage: [], collectionErrors: [] };
     let bookmarks = loadStored('wtl.case.bookmarks.v1', []);
+    let displayedEvidence = [];
 
     function text(value) { return value == null ? '' : String(value); }
     function escapeCell(value) {
@@ -348,38 +352,58 @@
     }
     function timelineRows(items) {
       return `<table><thead><tr>
-        <th class="action">收藏</th><th class="time">时间</th><th class="level">级别</th><th class="score">场景分</th>
-        <th class="scenario">命中依据</th><th class="group">证据组</th><th class="source">来源</th>
-        <th class="category">分类</th><th class="category">动作</th><th class="entity">实体</th><th class="pid">PID</th>
-        <th class="user">用户</th><th class="remote">远程/IP/域名</th><th class="path">路径</th><th class="details">详情</th>
-      </tr></thead><tbody>${items.map(item => `<tr class="${rowClass(item)}">
-        <td><button class="pin" data-pin="timeline" data-key="${escapeCell(bookmarkKey('timeline', item))}">${isBookmarked('timeline', item) ? '取消' : '收藏'}</button></td>
-        <td title="${escapeCell(item.time)}">${escapeCell(item.time)}</td><td>${levelBadge(item.level)}</td><td>${escapeCell(item.scenarioScore || 0)}</td>
-        <td title="${escapeCell(item.scenarioReason)}">${escapeCell(item.scenarioReason)}</td><td title="${escapeCell(item.group)}">${escapeCell(item.group)}</td>
-        <td title="${escapeCell(item.source)}">${escapeCell(item.source)}</td><td title="${escapeCell(item.category)}">${escapeCell(item.category)}</td>
-        <td title="${escapeCell(item.action)}">${escapeCell(item.action)}</td><td title="${escapeCell(item.entity)}">${escapeCell(item.entity)}</td>
-        <td>${escapeCell(item.pid)}</td><td title="${escapeCell(item.user)}">${escapeCell(item.user)}</td>
-        <td title="${escapeCell(item.remote)}">${escapeCell(item.remote)}</td><td title="${escapeCell(item.path)}">${escapeCell(item.path)}</td>
-        <td title="${escapeCell(item.details)}">${escapeCell(item.details)}</td>
-      </tr>`).join('')}</tbody></table>`;
+        <th class="time">时间</th><th class="level">级别</th><th class="source">来源 / 分类</th>
+        <th class="entity">实体 / 动作</th><th>线索摘要</th><th class="detail-action">详情</th><th class="action">收藏</th>
+      </tr></thead><tbody>${items.map(item => {
+        const index = displayedEvidence.push({ type: 'timeline', item }) - 1;
+        const summary = item.scenarioReason || item.details || item.remote || item.path;
+        return `<tr class="${rowClass(item)}">
+          <td title="${escapeCell(item.time)}">${escapeCell(item.time)}</td><td>${levelBadge(item.level)}</td>
+          <td title="${escapeCell([item.source, item.category].filter(Boolean).join(' / '))}">${escapeCell(item.source)}<span class="source-kind">${escapeCell(item.category)}</span></td>
+          <td title="${escapeCell([item.entity, item.action].filter(Boolean).join(' / '))}">${escapeCell(item.entity)}<span class="source-kind">${escapeCell(item.action)}</span></td>
+          <td title="${escapeCell(summary)}">${escapeCell(summary)}</td>
+          ${evidenceActions(index, 'timeline', item)}
+        </tr>`;
+      }).join('')}</tbody></table>`;
     }
     function entityRows(items) {
       return `<table><thead><tr>
-        <th class="action">收藏</th><th class="level">级别</th><th class="score">场景分</th><th class="scenario">命中依据</th>
-        <th class="group">证据组</th><th class="category">类型</th><th class="source">来源</th>
-        <th class="entity">名称</th><th class="entity">值</th><th class="pid">PID</th><th class="user">用户</th>
-        <th class="remote">远程/IP/域名</th><th class="path">路径</th><th class="source">哈希</th><th class="details">详情</th>
-      </tr></thead><tbody>${items.map(item => `<tr class="${rowClass(item)}">
-        <td><button class="pin" data-pin="entity" data-key="${escapeCell(bookmarkKey('entity', item))}">${isBookmarked('entity', item) ? '取消' : '收藏'}</button></td>
-        <td>${levelBadge(item.level)}</td><td>${escapeCell(item.scenarioScore || 0)}</td>
-        <td title="${escapeCell(item.scenarioReason)}">${escapeCell(item.scenarioReason)}</td><td title="${escapeCell(item.group)}">${escapeCell(item.group)}</td>
-        <td title="${escapeCell(item.kind)}">${escapeCell(item.kind)}</td>
-        <td title="${escapeCell(item.source)}">${escapeCell(item.source)}</td><td title="${escapeCell(item.name)}">${escapeCell(item.name)}</td>
-        <td title="${escapeCell(item.value)}">${escapeCell(item.value)}</td><td>${escapeCell(item.pid)}</td>
-        <td title="${escapeCell(item.user)}">${escapeCell(item.user)}</td><td title="${escapeCell(item.remote)}">${escapeCell(item.remote)}</td>
-        <td title="${escapeCell(item.path)}">${escapeCell(item.path)}</td><td title="${escapeCell(item.hash)}">${escapeCell(item.hash)}</td>
-        <td title="${escapeCell(item.details)}">${escapeCell(item.details)}</td>
-      </tr>`).join('')}</tbody></table>`;
+        <th class="level">级别</th><th class="source">来源 / 类型</th><th class="entity">名称</th>
+        <th>线索摘要</th><th class="detail-action">详情</th><th class="action">收藏</th>
+      </tr></thead><tbody>${items.map(item => {
+        const index = displayedEvidence.push({ type: 'entity', item }) - 1;
+        const summary = item.scenarioReason || item.details || item.remote || item.value || item.path;
+        return `<tr class="${rowClass(item)}">
+          <td>${levelBadge(item.level)}</td>
+          <td title="${escapeCell([item.source, item.kind].filter(Boolean).join(' / '))}">${escapeCell(item.source)}<span class="source-kind">${escapeCell(item.kind)}</span></td>
+          <td title="${escapeCell(item.name)}">${escapeCell(item.name)}</td>
+          <td title="${escapeCell(summary)}">${escapeCell(summary)}</td>
+          ${evidenceActions(index, 'entity', item)}
+        </tr>`;
+      }).join('')}</tbody></table>`;
+    }
+    function evidenceActions(index, type, item) {
+      return `<td class="detail-action"><button class="row-detail" data-evidence-action="detail" data-index="${index}">查看详情</button></td>
+        <td class="action"><button class="pin secondary" data-evidence-action="pin" data-index="${index}" aria-pressed="${isBookmarked(type, item)}">${isBookmarked(type, item) ? '取消' : '收藏'}</button></td>`;
+    }
+    function showEvidenceDetail(type, item) {
+      const timeline = type === 'timeline';
+      window.wtlShowEvidenceDetail(timeline ? '案件时间线详情' : '案件证据详情', [
+        { title: '证据身份', fields: [
+          ['名称 / 实体', timeline ? item.entity : item.name], ['记录 ID', item.id],
+          [timeline ? '分类' : '类型', timeline ? item.category : item.kind],
+          ...(timeline ? [['时间', item.time], ['动作', item.action], ['当前快照', item.current ? '是' : '否']] : [['值', item.value]]),
+          ['来源', item.source], ['证据组', item.group]
+        ] },
+        { title: '场景判断', fields: [
+          ['级别', item.level], ['场景分', item.scenarioScore || 0], ['命中依据', item.scenarioReason],
+          ['场景重点', item.focus ? '是' : '否']
+        ] },
+        { title: '关联对象', fields: [
+          ['PID', item.pid], ['用户', item.user], ['远程 / IP / 域名', item.remote], ['路径', item.path], ['哈希', item.hash]
+        ] },
+        { title: '完整证据', fields: [['详情', item.details], ['案件分析时间', snapshot.generatedAt]] }
+      ]);
     }
     function renderBookmarks() {
       previousPage.disabled = true;
@@ -434,6 +458,7 @@
       return items.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
     }
     function renderContent() {
+      displayedEvidence = [];
       document.querySelectorAll('button.tab').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === activeTab));
       renderSummary();
       if (activeTab === 'bookmarks') { renderBookmarks(); return; }
@@ -523,12 +548,12 @@
       render();
     });
     table.addEventListener('click', event => {
-      const button = event.target.closest('button[data-pin]');
+      const button = event.target.closest('button[data-evidence-action]');
       if (!button) return;
-      const type = button.dataset.pin;
-      const items = type === 'timeline' ? snapshot.timeline : snapshot.entities;
-      const item = items.find(x => bookmarkKey(type, x) === button.dataset.key) || bookmarks.find(x => x.key === button.dataset.key)?.item;
-      if (item) toggleBookmark(type, item);
+      const entry = displayedEvidence[Number(button.dataset.index)];
+      if (!entry) return;
+      if (button.dataset.evidenceAction === 'detail') showEvidenceDetail(entry.type, entry.item);
+      else toggleBookmark(entry.type, entry.item);
     });
     [queryEl, sourceEl, levelEl].forEach(control => control.addEventListener(control.tagName === 'INPUT' ? 'input' : 'change', () => {
       currentPage = 0;

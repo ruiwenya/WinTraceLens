@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ruiwenya/WinTraceLens/internal/coverage"
 	"github.com/ruiwenya/WinTraceLens/internal/winexec"
 )
 
@@ -647,6 +648,33 @@ $ordered = @($selected | Sort-Object @{Expression={ if ($_.LastRun) { $_.LastRun
 	snapshot.CollectionErrors = append(snapshot.CollectionErrors, ntfsWarnings...)
 	snapshot.CollectionErrors = append(snapshot.CollectionErrors, amcacheWarnings...)
 	snapshot.Notices = append(snapshot.Notices, amcacheNotices...)
+	covered := &coverage.Summary{Status: "Observed", Returned: len(snapshot.Records), Limit: maxRecords, LimitScope: "普通文件痕迹合并列表；持久化定向补采独立保留", Sort: "按取证源配额保留，源内优先风险或最近记录；不是全局完整时间排序", Roots: modifiedRoots, Warnings: append([]string(nil), snapshot.CollectionErrors...), Boundary: "只表示在扫描根目录、时间窗及采样配额内观察到的记录；阴性搜索不能排除未覆盖或已删除文件。"}
+	if len(covered.Roots) == 0 {
+		for _, root := range nativeLandingRoots(nil) {
+			covered.Roots = append(covered.Roots, root.path)
+		}
+	}
+	var times []string
+	seenSources := map[string]bool{}
+	for _, record := range snapshot.Records {
+		if record.Modified != "" {
+			times = append(times, record.Modified)
+		}
+		if !seenSources[record.Source] {
+			seenSources[record.Source] = true
+			covered.Sources = append(covered.Sources, record.Source)
+		}
+	}
+	covered.Earliest, covered.Latest = coverage.Times(times)
+	covered.LimitReached = len(snapshot.Records) >= maxRecords
+	covered.PossiblyTruncated = covered.LimitReached || len(snapshot.CollectionErrors) > 0
+	if len(snapshot.Records) == 0 {
+		covered.Status = "Not observed within coverage"
+	}
+	snapshot.Coverage = covered
+	if covered.LimitReached {
+		snapshot.CollectionErrors = append(snapshot.CollectionErrors, "结果已达到采集上限；当前阴性搜索不能排除更早或配额外的记录。")
+	}
 	return snapshot, nil
 }
 

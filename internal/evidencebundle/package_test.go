@@ -21,6 +21,21 @@ func exportFixture() []Dataset {
 	}
 }
 
+func TestMatchedEventsAndCoverageArePreservedIndependently(t *testing.T) {
+	datasets := []Dataset{{Source: "host", Options: json.RawMessage(`{}`), CollectedAt: time.Now(), Data: json.RawMessage(`{"services":[],"matchedEvents":[{"eventId":"7045","recordId":"123","timeUtc":"2026-10-13T08:00:00Z","serviceName":"Example","imagePath":"cmd /c C:\\Tests\\agent.exe","xml":"<Event>原始记录</Event>"}]}`)}, {Source: "file-traces", Options: json.RawMessage(`{}`), CollectedAt: time.Now(), Data: json.RawMessage(`{"records":[],"coverage":{"possiblyTruncated":true,"boundary":"阴性搜索不能排除配额外记录"}}`)}}
+	data, err := Build(context.Background(), datasets, "test", "test-host", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := readEvidenceZIP(t, data)
+	if !strings.Contains(string(files["data/001-host/matchedEvents.csv"]), "123") || !strings.Contains(string(files["data/001-host/snapshot.json"]), "原始记录") {
+		t.Fatal("matched event lost original record")
+	}
+	if !strings.Contains(string(files["summary.txt"]), "阴性搜索不能排除配额外记录") {
+		t.Fatal("coverage boundary missing from summary")
+	}
+}
+
 func readEvidenceZIP(t *testing.T, data []byte) map[string][]byte {
 	t.Helper()
 	reader, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))

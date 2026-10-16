@@ -871,6 +871,9 @@ func collectHost(maxItems int, opts Options) evidenceSection {
 		"notableUsers":             notableUsers(snapshot.Users),
 		"imageHijacks":             limitSlice(snapshot.ImageHijacks, maxItems),
 		"wmiSubscriptions":         limitSlice(snapshot.WMISubscriptions, maxItems),
+		"persistenceTargetFiles":   persistenceTargetsForAI(snapshot, maxItems),
+		"matchedServiceEvents":     persistenceEventsForAI(snapshot, maxItems),
+		"signatureScope":           "服务 path/MD5/signature/fileStatus 描述入口程序；executionChain.payloads 是后续目标，必须分别判断。Stopped 不能排除异步子进程或注入载荷。",
 	}
 	return evidenceSection{
 		Key:              sectionHost,
@@ -1196,21 +1199,39 @@ func topConnections(processes []map[string]any, maxItems int) []map[string]any {
 func suspiciousServices(items []host.ServiceInfo, maxItems int) []host.ServiceInfo {
 	out := make([]host.ServiceInfo, 0)
 	for _, item := range items {
-		if executableLooksSuspicious(item.Path, item.Signature, item.HashError) {
+		if item.RiskScore >= 4 || executableLooksSuspicious(item.Path, item.Signature, item.HashError) {
 			out = append(out, item)
 		}
 	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].RiskScore > out[j].RiskScore })
 	return limitSlice(out, maxItems)
 }
 
 func suspiciousTasks(items []host.ScheduledTaskInfo, maxItems int) []host.ScheduledTaskInfo {
 	out := make([]host.ScheduledTaskInfo, 0)
 	for _, item := range items {
-		if executableLooksSuspicious(item.Executable, item.Signature, item.HashError) || hasScriptOrLOLBIN(item.Command+" "+item.Arguments) {
+		if item.RiskScore >= 4 || executableLooksSuspicious(item.Executable, item.Signature, item.HashError) || hasScriptOrLOLBIN(item.Command+" "+item.Arguments) {
 			out = append(out, item)
 		}
 	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].RiskScore > out[j].RiskScore })
 	return limitSlice(out, maxItems)
+}
+
+func persistenceTargetsForAI(snapshot host.Snapshot, max int) []map[string]any {
+	var result []map[string]any
+	for _, item := range limitSlice(snapshot.TargetedFiles, max) {
+		result = append(result, map[string]any{"target": item.Target, "references": item.References, "directoryStatus": item.DirectoryStatus, "warnings": item.Warnings})
+	}
+	return result
+}
+
+func persistenceEventsForAI(snapshot host.Snapshot, max int) []map[string]any {
+	var result []map[string]any
+	for _, e := range limitSlice(snapshot.MatchedEvents, max) {
+		result = append(result, map[string]any{"timeUtc": e.TimeUTC, "eventId": e.EventID, "recordId": e.RecordID, "channel": e.Channel, "serviceName": e.ServiceName, "imagePath": e.ImagePath, "account": e.Account})
+	}
+	return result
 }
 
 func notableUsers(items []host.UserInfo) []host.UserInfo {

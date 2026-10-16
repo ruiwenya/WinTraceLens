@@ -98,7 +98,7 @@ func collectNativeLandingFiles(opts Options, limit int) ([]Record, []string) {
 				}
 				return nil
 			}
-			if depth > root.depth || isReparsePoint(path) {
+			if depth-1 > root.depth || isReparsePoint(path) {
 				return nil
 			}
 			filesSeen++
@@ -136,6 +136,9 @@ func collectNativeLandingFiles(opts Options, limit int) ([]Record, []string) {
 	}
 	if filesSeen >= 30000 {
 		warnings = append(warnings, "Go 原生落地点扫描达到 30000 个文件上限，已保留当前结果")
+	}
+	if len(records) >= limit {
+		warnings = append(warnings, fmt.Sprintf("Go 原生落地点扫描达到 %d 条记录上限，当前阴性搜索不能排除未覆盖文件。", limit))
 	}
 	sort.SliceStable(records, func(i, j int) bool {
 		if suspicionRank(records[i].Suspicion) != suspicionRank(records[j].Suspicion) {
@@ -434,13 +437,13 @@ func inspectLandingFile(path string, info os.FileInfo) (Record, bool) {
 	if len(head) >= 4096 && entropy >= 7.30 {
 		add(2, fmt.Sprintf("文件头样本熵较高（%.2f）", entropy))
 	}
-	content := safeScriptText(head)
+	content := normalizeCmdIndicators(safeScriptText(head))
 	relatedServices := serviceReferences(content)
 	if scriptIndicatorPattern.MatchString(content) {
 		add(2, "脚本包含持久化、下载或系统执行命令")
 	}
 	if len(relatedServices) > 0 {
-		add(2, "脚本直接创建、配置或启动服务")
+		add(2, "脚本文本包含服务操作字面量（静态线索，未执行）")
 	}
 	var signature process.SignatureResult
 	if magic == "PE" {
@@ -544,6 +547,7 @@ func safeScriptText(data []byte) string {
 	}, string(data))
 }
 func serviceReferences(text string) []string {
+	text = normalizeCmdIndicators(text)
 	matches := serviceCommandPattern.FindAllStringSubmatch(text, 20)
 	out := make([]string, 0, len(matches))
 	for _, match := range matches {
@@ -552,6 +556,12 @@ func serviceReferences(text string) []string {
 		}
 	}
 	return uniqueNativeStrings(out)
+}
+
+func normalizeCmdIndicators(text string) string {
+	text = strings.ReplaceAll(text, "^\r\n", "")
+	text = strings.ReplaceAll(text, "^\n", "")
+	return strings.ReplaceAll(text, "^", "")
 }
 func randomFileName(value string) bool {
 	if len(value) < 12 || !randomFileNamePattern.MatchString(value) {

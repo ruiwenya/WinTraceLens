@@ -350,7 +350,7 @@
   <header>
     <h1>WinTraceLens</h1>
     <div class="app-meta">
-      <span class="release-badge" data-app-version>2.0.0</span>
+      <span class="release-badge" data-app-version>2.0.1</span>
       <span class="permission-badge unknown" data-admin-status>权限检测中</span>
       <span class="module-title">Windows 事件日志分析</span>
     </div>
@@ -437,6 +437,7 @@
     const detailCloseEl = document.getElementById('detail-close');
     let events = [];
     let collectionErrors = [];
+	let eventCoverage=null;
     let activeTab = 'all';
     let detailRawText = '';
     let failureCounts = new Map();
@@ -804,6 +805,7 @@
       const view = viewDefinitions[activeTab] || viewDefinitions.all;
       const errors = relevantErrors();
       const reminders = [...view.reminders];
+	  if(eventCoverage){const c=eventCoverage;reminders.push(`采集范围：${c.earliest||'无记录时间'} 至 ${c.latest||'无记录时间'}；每条查询上限 ${c.limit}。${c.limitReached?'已触及上限，阴性搜索不能排除范围外记录。':''}${c.boundary}`)}
       errors.forEach(error => reminders.push(`采集提示：${error}`));
       viewContextEl.innerHTML = `
         <div>
@@ -1103,6 +1105,7 @@
       const data = await loadJSON(`/api/security/events?${params}`);
       events = (data.events || []).map((item, index) => ({ ...item, __key: String(index) }));
       collectionErrors = data.collectionErrors || [];
+	  eventCoverage=data.coverage||null;
       exportCSV.disabled = false;
       statusEl.textContent = `生成时间 ${data.generatedAt || ''}，范围 ${rangeText()}，事件 ${events.length}`;
       render();

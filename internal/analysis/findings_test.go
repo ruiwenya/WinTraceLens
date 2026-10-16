@@ -3,10 +3,20 @@ package analysis
 import (
 	"testing"
 
+	"github.com/ruiwenya/WinTraceLens/internal/commandchain"
 	"github.com/ruiwenya/WinTraceLens/internal/host"
 	"github.com/ruiwenya/WinTraceLens/internal/process"
 	"github.com/ruiwenya/WinTraceLens/internal/registryanomaly"
 )
+
+func TestServiceRiskReferencesPayloadNotSystemLauncher(t *testing.T) {
+	path := `C:\CustomRoot\agent.exe`
+	machine := host.Snapshot{Services: []host.ServiceInfo{{Name: "Example", Path: `C:\Windows\System32\cmd.exe`, Signature: "系统文件", MD5: "launcher-md5", RiskLevel: "高", RiskReasons: []string{"后续目标缺失"}, ExecutionChain: &commandchain.Chain{Payloads: []commandchain.Target{{Kind: "file", Path: path, FileStatus: "文件不存在"}}}}}}
+	values := BuildFindings(nil, machine)
+	if len(values) != 1 || values[0].Path != path || values[0].MD5 != "" || values[0].Signature == "系统文件" {
+		t.Fatalf("launcher trust leaked into payload finding: %+v", values)
+	}
+}
 
 func TestBuildFindingsRaisesUnsignedNetworkProcess(t *testing.T) {
 	findings := BuildFindings([]process.Info{{
